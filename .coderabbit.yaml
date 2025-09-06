@@ -9,14 +9,15 @@ reviews:
     drafts: false
     ignore_title_keywords: ["WIP", "draft"]
   path_filters:
-    - "src/**"
-    - "cpp/**"
-    - "cli/**"
-    - "Resources/lldb_server.py"
-    - "build.sh"
-    - "listfiles.sh"
-    - "!Patterns/**"
-    - "!README.md"
+    - "**/*"            # TEMP: review everything so local diffs are included
+    # When done testing, consider tightening filters to focus on app code and docs:
+    # - "src/**"
+    # - "cpp/**"
+    # - "cli/**"
+    # - "Resources/**"
+    # - ".coderabbit.yaml"
+    # - "**/*.md"
+    # - "!Patterns/**"
 
   tools:                         # Pro features; free for public OSS
     swiftlint:
