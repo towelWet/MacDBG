@@ -1,0 +1,39 @@
+# .coderabbit.yaml
+language: "en-US"
+
+reviews:
+  profile: "assertive"           # tighter feedback
+  high_level_summary: true
+  auto_review:
+    enabled: true
+    drafts: false
+    ignore_title_keywords: ["WIP", "draft"]
+  path_filters:
+    - "src/**"
+    - "cpp/**"
+    - "cli/**"
+    - "Resources/lldb_server.py"
+    - "build.sh"
+    - "listfiles.sh"
+    - "!Patterns/**"
+    - "!README.md"
+
+  tools:                         # Pro features; free for public OSS
+    swiftlint:
+      enabled: true
+    cppcheck:
+      enabled: true
+    ruff:
+      enabled: true
+    shellcheck:
+      enabled: true
+    markdownlint:
+      enabled: true
+    github-checks:
+      enabled: true
+
+pre_merge_checks:
+  title:
+    mode: "warning"
+  description:
+    mode: "warning"
