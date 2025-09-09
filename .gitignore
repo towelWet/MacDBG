@@ -20,11 +20,9 @@ xcuserdata/
 MacDBG.app/
 macdbg_cli
 *.dSYM/
-*.dylib
 
-# AI Models and large binaries
-models/
-*.gguf
+# AI Models and large binaries (keep models folder but exclude large GGUF files)
+models/*.gguf
 
 # Reference implementations and large dependencies
 gpt4all-reference/
