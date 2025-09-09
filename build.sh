@@ -70,19 +70,37 @@ cp "libAIBridge.dylib" "$APP_NAME/Contents/MacOS/"
 echo "🔧 Fixing library paths..."
 install_name_tool -change "libAIBridge.dylib" "@executable_path/libAIBridge.dylib" "$APP_NAME/Contents/MacOS/MacDBG"
 
-# Copy AI model
-echo "🧠 Copying AI model..."
+# Copy AI model (download if needed)
+echo "🧠 Setting up AI model..."
 mkdir -p "$APP_NAME/Contents/Resources/models"
 
 MODEL_FILE="qwen2.5-coder-3b-instruct-q4_0.gguf"
 MODEL_PATH="models/$MODEL_FILE"
+MODEL_URL="https://huggingface.co/Qwen/Qwen2.5-Coder-3B-Instruct-GGUF/resolve/main/qwen2.5-coder-3b-instruct-q4_0.gguf"
 
 if [ -f "$MODEL_PATH" ]; then
+    echo "   ✅ Using existing AI model: $MODEL_FILE"
     cp "$MODEL_PATH" "$APP_NAME/Contents/Resources/models/"
-    echo "   ✅ AI model copied successfully"
+elif command -v curl >/dev/null 2>&1; then
+    echo "   📥 Downloading AI model (this may take a few minutes)..."
+    mkdir -p models
+    if curl -L -o "$MODEL_PATH" "$MODEL_URL" --progress-bar; then
+        echo "   ✅ AI model downloaded successfully"
+        cp "$MODEL_PATH" "$APP_NAME/Contents/Resources/models/"
+    else
+        echo "   ⚠️  AI model download failed - AI features will use fallback mode"
+    fi
+elif command -v wget >/dev/null 2>&1; then
+    echo "   📥 Downloading AI model using wget..."
+    mkdir -p models
+    if wget -O "$MODEL_PATH" "$MODEL_URL" --progress=bar; then
+        echo "   ✅ AI model downloaded successfully"
+        cp "$MODEL_PATH" "$APP_NAME/Contents/Resources/models/"
+    else
+        echo "   ⚠️  AI model download failed - AI features will use fallback mode"
+    fi
 else
-    echo "   ❌ ERROR: AI model not found at $MODEL_PATH"
-    exit 1
+    echo "   ⚠️  No download tool available (curl/wget) - AI features will use fallback mode"
 fi
 
 # Copy Python lldb server script (required)
