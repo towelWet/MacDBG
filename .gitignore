@@ -28,6 +28,7 @@ models/
 
 # Reference implementations and large dependencies
 gpt4all-reference/
+gpt4all-backend/
 
 # Logs and caches
 *.log
