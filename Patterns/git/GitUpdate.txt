@@ -1,0 +1,94 @@
+🧭 Here's a clean, copy-pasteable flow to update an existing GitHub repo with your local compiling code (keep local on conflicts).
+
+#1 — Go to the project
+
+cd /Users/towelwet/Downloads/MacDBG
+
+
+#2 — Ensure repo + remote
+
+# init only if .git doesn't exist
+[ -d .git ] || git init
+git branch -M main
+
+# (re)set remote safely
+git remote remove origin 2>/dev/null || true
+git remote add origin https://github.com/towelWet/MacDBG.git
+
+
+#3 — Stage & commit local work
+
+git add -A
+git commit -m "Update: compiles; fixes; unify APIs; resolve build errors" || echo "No local changes to commit"
+
+
+#4 — Pull remote history, prefer your local on conflicts
+
+git fetch origin
+# If remote existed (README/license, prior commits), merge it while preferring local:
+git pull origin main --allow-unrelated-histories -X ours
+# If any files still show conflicts:
+git diff --name-only --diff-filter=U
+# For each conflicted file you want to keep local:
+#   git checkout --ours path/to/file
+git add -A
+git commit -m "Merge origin/main → main (prefer local/ours)" || echo "No merge commit needed"
+
+
+#5 — Push to GitHub
+
+git push -u origin main
+
+
+⚡️ Fast alternatives (pick one if it fits)
+
+Remote is empty (brand-new): skip #4, just push.
+
+git push -u origin main
+
+
+You want to automatically keep local on all conflicts:
+
+git fetch origin
+git merge -X ours origin/main
+git add -A && git commit -m "Resolve with -X ours" || true
+git push -u origin main
+
+
+You intentionally want your local to REPLACE remote history (destructive):
+
+git push -f origin main
+
+
+(Use only if you're sure the remote history can be overwritten.)
+
+🧰 Common issues (quick fixes)
+
+Remote already set:
+
+git remote set-url origin https://github.com/towelWet/MacDBG.git
+
+
+"Updates were rejected / non-fast-forward": pull with local preference, then push.
+
+git pull origin main -X ours
+git push
+
+
+"refusing to merge unrelated histories": you already covered it with --allow-unrelated-histories.
+
+Accidentally committed build/large files:
+
+# add to .gitignore, then:
+git rm -r --cached .
+git add -A
+git commit -m "Apply .gitignore (remove tracked build artifacts)"
+git push
+
+
+Large push errors (no LFS): try removing big files or enable LFS later. As a stopgap:
+
+git config --global http.postBuffer 524288000
+
+
+👌 That's the streamlined, "keep-local" update path.

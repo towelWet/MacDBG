@@ -1,0 +1,258 @@
+🎨 Official Fonts: Inter, Roboto.
+
+🍏 Apple Design Philosophy
+
+✨ Clarity, Deference, Depth: Sharp text, subtle UI layers.
+
+📏 Classic HIG: Aesthetic integrity, consistency, direct manipulation, feedback, metaphors, user control.
+
+🎯 Focus & Simplicity: Prioritize tasks, minimize complexity.
+
+💎 Aesthetic Integrity: Visual aligns with app purpose.
+
+📚 Consistency: Follow conventions within app/ecosystem.
+
+🔄 Iterative Evolution: From skeuomorphic → flat/minimal (iOS 7+).
+
+📱 UI Layout & Structure
+
+✅ Responsive Layout: No horizontal scroll/zoom.
+
+🌐 Adaptive Layouts: Use Auto Layout/SwiftUI.
+
+📐 Safe Areas & Margins: Avoid obscured content.
+
+🗺️ Consistent Grid: 4pt/8pt increments, ample whitespace (~16pt).
+
+✅ Organized Layout: Controls near related content.
+
+👁️ Visual Hierarchy: Size, color, spacing, alignment.
+
+🧭 Standard Navigation: Use Apple’s recommended patterns.
+
+🎞️ Fluid Transitions: Maintain context/navigation flow.
+
+🔤 Typography
+
+🔤 San Francisco Font: SF Text (≤19pt), SF Display (≥20pt).
+
+📏 Dynamic Type: System text-size scaling.
+
+✅ Minimum Text Size: 11pt+ (iOS ~17pt, tvOS ~18pt).
+
+🅰️ Clear Hierarchy: 1-2 fonts; minimal weights/styles.
+
+✅ Contrast: 4.5:1 minimum ratio.
+
+✅ Spacing: Avoid text overlap, adjust line height/letter spacing.
+
+🖼️ Iconography
+
+🎯 App Icons: Simple, memorable, no text (single stylized letters allowed).
+
+🖼️ Simplicity: Flat graphics, avoid detailed textures/photos.
+
+✂️ Scalable Clarity: Vector/high-res (up to 1024px).
+
+📱 Specs:
+
+iOS: Rounded rectangles.
+
+macOS (Big Sur+): Rounded squares.
+
+watchOS: Circular (196px).
+
+tvOS: Parallax-friendly, opaque.
+
+visionOS: Layered 3D icons.
+
+🧩 In-App Icons: Use SF Symbols.
+
+✅ Assets: @2x/@3x Retina images, consistent aspect ratios.
+
+🚀 Interaction & Input
+
+✅ Touch-Friendly: Optimized UI elements.
+
+✅ Hit Targets: Min. 44pt x 44pt.
+
+🔄 Standard Gestures: Familiar interactions, no repurposing.
+
+🚫 Avoid Hijacking: Preserve system-wide gestures.
+
+🤲 Multi-Touch Optional: Secondary enhancement.
+
+🖱️ Pointer & Keyboard: Usable via hover effects, context menus.
+
+🎮 tvOS Navigation: Clear focus indicators, spaced UI.
+
+🎙️ Voice-Friendly: Siri integration, clear labels.
+
+👓 Spatial (visionOS): Gaze targeting, pinch-click, comfortable 1–1.5m distance, Spatial Audio.
+
+♿ Accessibility
+
+♿ Inclusive: Support visual/auditory/motor/cognitive diversity.
+
+🏷️ Descriptive Labels: VoiceOver/Switch Control compatibility.
+
+🎨 High Contrast: Dark Mode, min. 4.5:1 contrast, avoid color-only cues.
+
+🔍 Scalable Content: Dynamic Type, Zoom, Bold Text support.
+
+🎧 Multiple Feedback: Visual, audio, haptic signals.
+
+🖼️ Alt Text: Image descriptions.
+
+🖥️ System Colors: Adaptable to light/dark mode & accessibility.
+
+🎨 Visual Design & Style
+
+🎨 Restrained Colors: Semantic use, system colors preferred.
+
+🖌️ System Colors & Materials: Native appearance & adaptation.
+
+🌈 Minimal Effects: Subtle shadows/blurs/gradients.
+
+🌀 Depth via Layers: Translucency, subtle motion.
+
+📜 Flat Design: From skeuomorphic → minimalistic flat UI.
+
+🚫 Deprecated Styles: No glossy buttons or 3D Touch reliance.
+
+📺 Platform Highlights
+
+📱 iOS/iPadOS: Touch-first, tab bars preferred, Dark Mode, multi-window/pointer on iPad.
+
+💻 macOS: Menubar, resizable windows, sidebar navigation, Dark Mode.
+
+⌚ watchOS: Glanceable, compact, Digital Crown, high contrast.
+
+📺 tvOS: Large text, simple grids, parallax focus effects.
+
+🥽 visionOS: Spatial immersion, gaze/hand input, Spatial Audio, blend with real-world visuals.
+
+Tools:
+
+🧠 AI UI/UX Tools
+https://stitch.withgoogle.com/
+
+https://same.new/
+
+https://bolt.new/
+
+https://getmocha.com/
+
+https://readdy.ai/
+
+https://uizard.io/
+
+https://lovable.dev/
+
+https://v0.dev/
+
+https://www.recraft.ai/
+
+🎨 Design & UI Tools
+https://www.figma.com/
+
+https://www.autodraw.com/
+
+https://designer.microsoft.com/
+
+https://design.penpot.app/
+
+🧩 UI Components & Templates
+https://uiverse.io/
+
+https://www.tailawesome.com/?price=free
+
+https://www.hyperui.dev/
+
+https://www.systemuicons.com/
+
+🌈 Color Palettes
+https://coolors.co/
+
+https://color.adobe.com/create/color-wheel
+
+https://mycolor.space/
+
+http://colormind.io/
+
+https://paletton.com/
+
+https://www.happyhues.co/
+
+https://yeun.github.io/open-color/
+
+https://www.color-hex.com/color-palettes/popular.php
+
+🏷️ Brand Colors
+https://brandpalettes.com/
+
+https://brandcolors.net/
+
+🌐 Website Builders
+https://webflow.com/
+
+https://www.framer.com/
+
+🌀 Animation Tools
+https://gsap.com/
+
+📏 Delta E Calculation
+https://colormine.org/delta-e-calculator
+
+http://www.brucelindbloom.com/index.html?ColorDifferenceCalc.html
+
+https://www.easyrgb.com/en/compare.php#inputFORM
+
+Spacing:
+
+Use a Grid System
+
+Follow a consistent grid (typically based on 4pt or 8pt increments).
+
+Align elements to the grid to create order and predictability.
+
+Embrace White Space
+
+Add generous spacing around blocks of content to improve readability.
+
+Give breathing room to individual UI elements (buttons, icons, images).
+
+Maintain Consistency
+
+Use a design system or spacing scale (e.g., 4, 8, 16, 24, 32, 40pt).
+
+Reuse consistent spacing patterns for margins and paddings.
+
+Pair Spacing with Content Hierarchy
+
+Increase spacing between sections to indicate separation.
+
+Reduce spacing within tightly related elements.
+
+Center Carefully
+
+Vertically and horizontally align content within components (e.g. icons inside buttons).
+
+Use Relative Units in Typography
+
+Use em, rem, % for scalable designs, especially in web.
+
+📚 Guides & Articles
+
+Material Design Spacing Guidelines
+Google's structured spacing rules and tokens for responsive design.
+🎨 https://m3.material.io/foundations/layout/applying-layout/window-size-classes
+
+🛠️ Tools
+Grid Lover
+A tool to build vertical rhythm and spacing with typographic scale.
+🔠 https://www.gridlover.net/
+
+8pt Grid Cheat Sheet on Spec.fm
+A quick reference to standard spacing values.
+🧾 https://spec.fm/specifics/8-pt-grid
