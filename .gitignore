@@ -26,6 +26,9 @@ macdbg_cli
 models/
 *.gguf
 
+# Reference implementations and large dependencies
+gpt4all-reference/
+
 # Logs and caches
 *.log
 *.tmp
