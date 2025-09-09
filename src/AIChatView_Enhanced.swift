@@ -5,10 +5,12 @@ struct AIChatView_Enhanced: View {
     @State private var messageText = ""
     @State private var isWaitingForResponse = false
     @FocusState private var isTextFieldFocused: Bool
+    @State private var topSectionHeight: CGFloat = 200
+    @State private var isDragging = false
     
     var body: some View {
         VStack(spacing: 0) {
-            // Header with ChatGPT-style branding
+            // Header
             HStack {
                 HStack(spacing: 8) {
                     Image(systemName: "brain.head.profile")
@@ -44,87 +46,138 @@ struct AIChatView_Enhanced: View {
             .padding()
             .background(Color(NSColor.controlBackgroundColor))
             
-            // Chat Messages - ChatGPT style
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 16) {
-                        if aiManager.aiSuggestions.isEmpty {
-                            // Welcome message
-                            VStack(spacing: 16) {
-                                Image(systemName: "brain.head.profile")
-                                    .font(.system(size: 60))
-                                    .foregroundColor(.blue.opacity(0.6))
-                                
-                                VStack(spacing: 8) {
-                                    Text("Welcome to AI Assistant")
-                                        .font(.title2)
-                                        .fontWeight(.semibold)
+            // Welcome message and Quick Start (fixed at top)
+            VStack(spacing: 16) {
+                Image(systemName: "brain.head.profile")
+                    .font(.system(size: 40))
+                    .foregroundColor(.blue.opacity(0.6))
+                
+                VStack(spacing: 8) {
+                    Text("Welcome to AI Assistant")
+                        .font(.title2)
+                        .fontWeight(.semibold)
+                    
+                    Text("I can help you analyze disassembly code, explain instructions, find bugs, and suggest optimizations.")
+                        .font(.body)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+                
+                // Quick start buttons
+                VStack(spacing: 8) {
+                    Text("Quick Start")
+                        .font(.headline)
+                        .foregroundColor(.primary)
+                    
+                    HStack(spacing: 12) {
+                        QuickActionButton(
+                            icon: "arrow.right.circle",
+                            title: "Explain Code",
+                            color: .blue
+                        ) {
+                            messageText = "Explain this disassembly code:"
+                            sendMessage()
+                        }
+                        
+                        QuickActionButton(
+                            icon: "exclamationmark.triangle",
+                            title: "Find Bugs",
+                            color: .red
+                        ) {
+                            messageText = "Find potential bugs in this code:"
+                            sendMessage()
+                        }
+                        
+                        QuickActionButton(
+                            icon: "speedometer",
+                            title: "Optimize",
+                            color: .orange
+                        ) {
+                            messageText = "Suggest optimizations for this code:"
+                            sendMessage()
+                        }
+                    }
+                }
+                .padding()
+                .background(Color(NSColor.controlBackgroundColor))
+                .cornerRadius(12)
+            }
+            .padding()
+            
+            // Top section (resizable) - Chat Messages
+            VStack {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 16) {
+                            if aiManager.aiSuggestions.isEmpty {
+                                // Empty state
+                                VStack(spacing: 16) {
+                                    Text("Start a conversation with AI")
+                                        .font(.headline)
+                                        .foregroundColor(.secondary)
                                     
-                                    Text("I can help you analyze disassembly code, explain instructions, find bugs, and suggest optimizations.")
+                                    Text("Use the Quick Start buttons above or type a message below")
                                         .font(.body)
                                         .foregroundColor(.secondary)
                                         .multilineTextAlignment(.center)
                                 }
-                                
-                                // Quick start buttons
-                                VStack(spacing: 8) {
-                                    Text("Quick Start")
-                                        .font(.headline)
-                                        .foregroundColor(.primary)
-                                    
-                                    HStack(spacing: 12) {
-                                        QuickActionButton(
-                                            icon: "arrow.right.circle",
-                                            title: "Explain Code",
-                                            color: .blue
-                                        ) {
-                                            messageText = "Explain this disassembly code:"
-                                            sendMessage()
-                                        }
-                                        
-                                        QuickActionButton(
-                                            icon: "exclamationmark.triangle",
-                                            title: "Find Bugs",
-                                            color: .red
-                                        ) {
-                                            messageText = "Find potential bugs in this code:"
-                                            sendMessage()
-                                        }
-                                        
-                                        QuickActionButton(
-                                            icon: "speedometer",
-                                            title: "Optimize",
-                                            color: .orange
-                                        ) {
-                                            messageText = "Suggest optimizations for this code:"
-                                            sendMessage()
-                                        }
-                                    }
-                                }
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
                                 .padding()
-                                .background(Color(NSColor.controlBackgroundColor))
-                                .cornerRadius(12)
-                            }
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .padding()
-                        } else {
-                            // Chat messages
-                            ForEach(aiManager.aiSuggestions, id: \.id) { suggestion in
-                                ChatMessageBubble(suggestion: suggestion)
-                                    .id(suggestion.id)
+                            } else {
+                                // Chat messages
+                                ForEach(aiManager.aiSuggestions, id: \.id) { suggestion in
+                                    ChatMessageBubble(suggestion: suggestion)
+                                        .id(suggestion.id)
+                                }
                             }
                         }
+                        .padding()
                     }
-                    .padding()
-                }
-                .onChange(of: aiManager.aiSuggestions.count) { _ in
-                    if let lastSuggestion = aiManager.aiSuggestions.last {
-                        withAnimation(.easeInOut(duration: 0.3)) {
-                            proxy.scrollTo(lastSuggestion.id, anchor: .bottom)
+                    .onChange(of: aiManager.aiSuggestions.count) { _ in
+                        if let lastSuggestion = aiManager.aiSuggestions.last {
+                            withAnimation(.easeInOut(duration: 0.3)) {
+                                proxy.scrollTo(lastSuggestion.id, anchor: .bottom)
+                            }
                         }
                     }
                 }
             }
+            .frame(height: topSectionHeight)
+            
+            // Vertical resize handle - moved down as requested
+            HStack {
+                Spacer()
+                Rectangle()
+                    .fill(isDragging ? Color.blue.opacity(0.5) : Color.gray.opacity(0.3))
+                    .frame(width: 60, height: 6)
+                    .cornerRadius(3)
+                    .onHover { hovering in
+                        if hovering && !isDragging {
+                            NSCursor.resizeUpDown.push()
+                        } else if !hovering && !isDragging {
+                            NSCursor.pop()
+                        }
+                    }
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { value in
+                                if !isDragging {
+                                    isDragging = true
+                                    NSCursor.resizeUpDown.push()
+                                }
+                                let newHeight = topSectionHeight + value.translation.height
+                                topSectionHeight = max(100, min(300, newHeight))
+                                print("Resizing: \(topSectionHeight)")
+                            }
+                            .onEnded { _ in
+                                isDragging = false
+                                NSCursor.pop()
+                            }
+                    )
+                Spacer()
+            }
+            .padding(.vertical, 4)
+            .help("Drag to resize chat area vertically")
             
             // Input Area - ChatGPT style
             VStack(spacing: 12) {

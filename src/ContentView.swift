@@ -36,13 +36,17 @@ struct ContentView: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 12)
             
-            // Main workspace - Original 4-panel layout
-            mainWorkspaceView
-            
-            // Right sidebar - AI Chat (when enabled)
-            if showingAIAnalysis {
-                AIChatView_Enhanced(aiManager: aiManager)
-                    .frame(minWidth: 450, maxWidth: 600)
+            // Main workspace with AI chat section
+            HSplitView {
+                // Main workspace - Original 4-panel layout
+                mainWorkspaceView
+                    .frame(minWidth: 400)
+                
+                // AI chat section with built-in resize
+                if showingAIAnalysis {
+                    AIChatView_Enhanced(aiManager: aiManager)
+                        .frame(minWidth: 200, idealWidth: 300, maxWidth: 500)
+                }
             }
         }
         .onAppear {
@@ -370,6 +374,48 @@ struct ContentView_Previews: PreviewProvider {
     static var previews: some View {
         ContentView()
             .frame(width: 1400, height: 900)
+    }
+}
+
+// MARK: - Resizable AI Chat View
+struct ResizableAIChatView: View {
+    @ObservedObject var aiManager: AIModelManager
+    @State private var chatWidth: CGFloat = 400
+    @State private var isDragging = false
+    
+    var body: some View {
+        HStack(spacing: 0) {
+            // Resize handle
+            Rectangle()
+                .fill(isDragging ? Color.blue.opacity(0.5) : Color.gray.opacity(0.3))
+                .frame(width: 8)
+                .onHover { hovering in
+                    if hovering && !isDragging {
+                        NSCursor.resizeLeftRight.push()
+                    } else if !hovering && !isDragging {
+                        NSCursor.pop()
+                    }
+                }
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { value in
+                            if !isDragging {
+                                isDragging = true
+                                NSCursor.resizeLeftRight.push()
+                            }
+                            let newWidth = chatWidth - value.translation.width
+                            chatWidth = max(200, min(600, newWidth))
+                        }
+                        .onEnded { _ in
+                            isDragging = false
+                            NSCursor.pop()
+                        }
+                )
+            
+            // AI Chat content
+            AIChatView_Enhanced(aiManager: aiManager)
+                .frame(width: chatWidth)
+        }
     }
 }
 
