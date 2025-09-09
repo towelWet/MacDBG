@@ -48,10 +48,10 @@ public struct AIAssistantView: View {
                 
                 HStack {
                     Circle()
-                        .fill(aiManager.isModelLoaded ? .green : .red)
+                        .fill(aiManager.isModelLoaded ? .green : .orange)
                         .frame(width: 8, height: 8)
                     
-                    Text(aiManager.isModelLoaded ? "Model: \(aiManager.modelName)" : "No Model Loaded")
+                    Text(aiManager.isModelLoaded ? "Model: \(aiManager.modelName)" : "Fallback Mode")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -81,7 +81,7 @@ public struct AIAssistantView: View {
                         Text("Analyze")
                     }
                 }
-                .disabled(!aiManager.isModelLoaded || isAnalyzing || !canAnalyze)
+                .disabled(isAnalyzing || !canAnalyze)
                 .buttonStyle(.borderedProminent)
                 
                 // Settings Button

@@ -1,94 +1,106 @@
-🧭 Here's a clean, copy-pasteable flow to update an existing GitHub repo with your local compiling code (keep local on conflicts).
+🧭 Clean, copy-pasteable “keep-local” flow (generic repo/paths)
 
-#1 — Go to the project
+\#1 — Go to the project
 
-cd /Users/towelwet/Downloads/MacDBG
+```bash
+cd /path/to/your/project
+```
 
+\#2 — Ensure repo + remote
 
-#2 — Ensure repo + remote
+```bash
+PROJECT_DIR="/path/to/your/project"
+ORIGIN_URL="https://github.com/<owner>/<repo>.git"
+BRANCH="main"
 
-# init only if .git doesn't exist
 [ -d .git ] || git init
-git branch -M main
+git branch -M "$BRANCH"
 
-# (re)set remote safely
 git remote remove origin 2>/dev/null || true
-git remote add origin https://github.com/towelWet/MacDBG.git
+git remote add origin "$ORIGIN_URL"
+```
 
+\#3 — Stage & commit local work
 
-#3 — Stage & commit local work
-
+```bash
 git add -A
 git commit -m "Update: compiles; fixes; unify APIs; resolve build errors" || echo "No local changes to commit"
+```
 
+\#4 — Pull remote history, prefer your local on conflicts
 
-#4 — Pull remote history, prefer your local on conflicts
-
+```bash
 git fetch origin
-# If remote existed (README/license, prior commits), merge it while preferring local:
-git pull origin main --allow-unrelated-histories -X ours
-# If any files still show conflicts:
+git pull origin "$BRANCH" --allow-unrelated-histories -X ours || true
+
 git diff --name-only --diff-filter=U
 # For each conflicted file you want to keep local:
 #   git checkout --ours path/to/file
+
 git add -A
-git commit -m "Merge origin/main → main (prefer local/ours)" || echo "No merge commit needed"
+git commit -m "Merge origin/$BRANCH → $BRANCH (prefer local/ours)" || echo "No merge commit needed"
+```
 
+\#5 — Push to GitHub
 
-#5 — Push to GitHub
+```bash
+git push -u origin "$BRANCH"
+```
 
-git push -u origin main
-
-
-⚡️ Fast alternatives (pick one if it fits)
+⚡️ Fast alternatives
 
 Remote is empty (brand-new): skip #4, just push.
 
-git push -u origin main
+```bash
+git push -u origin "$BRANCH"
+```
 
+Automatically keep local on all conflicts:
 
-You want to automatically keep local on all conflicts:
-
+```bash
 git fetch origin
-git merge -X ours origin/main
+git merge -X ours origin/"$BRANCH"
 git add -A && git commit -m "Resolve with -X ours" || true
-git push -u origin main
+git push -u origin "$BRANCH"
+```
 
+Intentionally REPLACE remote history (destructive):
 
-You intentionally want your local to REPLACE remote history (destructive):
+```bash
+git push -f origin "$BRANCH"
+```
 
-git push -f origin main
-
-
-(Use only if you're sure the remote history can be overwritten.)
+(Use only if you’re sure overwriting remote history is desired.)
 
 🧰 Common issues (quick fixes)
 
 Remote already set:
 
-git remote set-url origin https://github.com/towelWet/MacDBG.git
+```bash
+git remote set-url origin "$ORIGIN_URL"
+```
 
+“Updates were rejected / non-fast-forward”:
 
-"Updates were rejected / non-fast-forward": pull with local preference, then push.
-
-git pull origin main -X ours
+```bash
+git pull origin "$BRANCH" -X ours
 git push
+```
 
-
-"refusing to merge unrelated histories": you already covered it with --allow-unrelated-histories.
+“refusing to merge unrelated histories”: covered by `--allow-unrelated-histories`.
 
 Accidentally committed build/large files:
 
-# add to .gitignore, then:
+```bash
+# add them to .gitignore first, then:
 git rm -r --cached .
 git add -A
 git commit -m "Apply .gitignore (remove tracked build artifacts)"
 git push
+```
 
+Large push errors (no LFS) — temporary buffer increase:
 
-Large push errors (no LFS): try removing big files or enable LFS later. As a stopgap:
-
+```bash
 git config --global http.postBuffer 524288000
-
-
-👌 That's the streamlined, "keep-local" update path.
+```

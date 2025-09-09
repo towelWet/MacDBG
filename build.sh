@@ -73,11 +73,27 @@ install_name_tool -change "libAIBridge.dylib" "@executable_path/libAIBridge.dyli
 # Copy AI model
 echo "🧠 Copying AI model..."
 mkdir -p "$APP_NAME/Contents/Resources/models"
-cp "models/qwen2.5-coder-3b-instruct-q4_0.gguf" "$APP_NAME/Contents/Resources/models/"
 
-# Copy Python lldb server script
+MODEL_FILE="qwen2.5-coder-3b-instruct-q4_0.gguf"
+MODEL_PATH="models/$MODEL_FILE"
+
+if [ -f "$MODEL_PATH" ]; then
+    cp "$MODEL_PATH" "$APP_NAME/Contents/Resources/models/"
+    echo "   ✅ AI model copied successfully"
+else
+    echo "   ❌ ERROR: AI model not found at $MODEL_PATH"
+    exit 1
+fi
+
+# Copy Python lldb server script (required)
 echo "🐍 Copying lldb_server.py to Resources..."
-cp "Resources/lldb_server.py" "$APP_NAME/Contents/Resources/"
+if [ -f "Resources/lldb_server.py" ]; then
+    cp "Resources/lldb_server.py" "$APP_NAME/Contents/Resources/"
+    echo "   ✅ LLDB server script copied successfully"
+else
+    echo "   ❌ ERROR: lldb_server.py not found - debugging will not work!"
+    exit 1
+fi
 
 # Create the Info.plist
 echo "📝 Creating Info.plist..."

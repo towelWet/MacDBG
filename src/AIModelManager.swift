@@ -20,12 +20,44 @@ public class AIModelManager: ObservableObject {
     public init() {
         self.aiBridge = AIModelBridge()
         
-        // Get the model path from the bundle
-        if let bundlePath = Bundle.main.resourcePath {
-            self.modelPath = "\(bundlePath)/models/qwen2.5-coder-3b-instruct-q4_0.gguf"
-        } else {
-            self.modelPath = ""
+        // Get the model path - try multiple locations for development vs production
+        let modelFiles = [
+            "qwen2.5-coder-3b-instruct-q4_0.gguf",
+            "qwen2.5-coder-7b-instruct-q4_0.gguf",
+            "qwen-coder-3b-q4_0.gguf",
+            "qwen-coder-7b-q4_0.gguf"
+        ]
+        
+        var selectedPath = ""
+        
+        // Try different possible locations
+        let possiblePaths = [
+            Bundle.main.resourcePath.map { "\($0)/models" },  // App bundle
+            FileManager.default.currentDirectoryPath + "/models",  // Development directory
+            FileManager.default.currentDirectoryPath + "/MacDBG.app/Contents/Resources/models"  // Built app in dev directory
+        ].compactMap { $0 }
+        
+        // Search for the first available model in any location
+        searchLoop: for basePath in possiblePaths {
+            for modelFile in modelFiles {
+                let testPath = "\(basePath)/\(modelFile)"
+                if FileManager.default.fileExists(atPath: testPath) {
+                    selectedPath = testPath
+                    break searchLoop
+                }
+            }
         }
+        
+        // Fallback to default path if no model found
+        if selectedPath.isEmpty {
+            if let bundlePath = Bundle.main.resourcePath {
+                selectedPath = "\(bundlePath)/models/qwen2.5-coder-3b-instruct-q4_0.gguf"
+            } else {
+                selectedPath = "models/qwen2.5-coder-3b-instruct-q4_0.gguf"
+            }
+        }
+        
+        self.modelPath = selectedPath
         
         // Try to load the actual model on initialization
         Task {
@@ -35,16 +67,20 @@ public class AIModelManager: ObservableObject {
     
     // MARK: - Model Management
     public func loadModel() async {
+        macdbgLog("🔍 Attempting to load AI model from: \(modelPath)", category: .system)
+        
         guard !modelPath.isEmpty else {
-            lastError = "Model path not found"
-            macdbgLog("❌ AI Model path not found in bundle", category: .error)
+            lastError = "Bundle path not available"
+            macdbgLog("⚠️ AI Model bundle path not found - AI features will use fallback mode", category: .system)
             return
         }
         
         // Check if model file exists
         guard FileManager.default.fileExists(atPath: modelPath) else {
-            lastError = "Model file not found at path: \(modelPath)"
-            macdbgLog("❌ AI Model file not found at path: \(modelPath)", category: .error)
+            lastError = "Model file not found - AI features available in fallback mode"
+            macdbgLog("⚠️ AI Model file not found at: \(modelPath)", category: .system)
+            macdbgLog("📁 Current directory: \(FileManager.default.currentDirectoryPath)", category: .debug)
+            macdbgLog("� Bundle resource path: \(Bundle.main.resourcePath ?? "nil")", category: .debug)
             return
         }
         
@@ -93,9 +129,8 @@ public class AIModelManager: ObservableObject {
     // MARK: - Text Generation
     public func generateText(prompt: String, maxTokens: Int = 512) async -> String {
         guard isModelLoaded else {
-            let error = lastError ?? "AI model not loaded"
-            macdbgLog("❌ AI generation failed: \(error)", category: .error)
-            return "Error: \(error)\n\nTry restarting MacDBG to reload the AI model."
+            // Provide helpful fallback responses instead of just error messages
+            return generateFallbackResponse(for: prompt)
         }
         
         macdbgLog("🤖 Generating AI response for prompt: \(prompt.prefix(50))...", category: .system)
@@ -110,6 +145,69 @@ public class AIModelManager: ObservableObject {
                     continuation.resume(returning: "Error: AI model returned empty response")
                 }
             }
+        }
+    }
+    
+    // MARK: - Fallback AI Responses (when model is not available)
+    private func generateFallbackResponse(for prompt: String) -> String {
+        let lowerPrompt = prompt.lowercased()
+        
+        if lowerPrompt.contains("analyze") && lowerPrompt.contains("disassembly") {
+            return """
+            AI Model Unavailable - Basic Analysis:
+            
+            To enable full AI analysis, please add a compatible model file to:
+            MacDBG.app/Contents/Resources/models/
+            
+            In the meantime, you can manually analyze:
+            • Look for function prologues (push rbp, mov rbp, rsp)
+            • Identify loops and conditional jumps
+            • Check for system calls and library functions
+            • Examine stack operations and register usage
+            """
+        } else if lowerPrompt.contains("register") {
+            return """
+            AI Model Unavailable - Register Info:
+            
+            Common x64 registers:
+            • RAX/EAX/AX/AL: Accumulator, return values
+            • RBX/EBX/BX/BL: Base register, preserved
+            • RCX/ECX/CX/CL: Counter, loop operations
+            • RDX/EDX/DX/DL: Data, I/O operations
+            • RSP/ESP/SP: Stack pointer
+            • RBP/EBP/BP: Base pointer, frame pointer
+            • RSI/ESI/SI: Source index
+            • RDI/EDI/DI: Destination index
+            """
+        } else if lowerPrompt.contains("breakpoint") {
+            return """
+            AI Model Unavailable - Breakpoint Suggestions:
+            
+            Good breakpoint locations:
+            • Function entry points
+            • Before/after system calls
+            • Loop conditions and counters
+            • Error handling branches
+            • Memory allocation/deallocation
+            • Critical variable assignments
+            """
+        } else {
+            return """
+            AI Model Not Available
+            
+            The AI assistant requires a language model file to provide intelligent responses.
+            
+            To enable AI features:
+            1. Download a compatible GGUF model (e.g., qwen2.5-coder-3b-instruct-q4_0.gguf)
+            2. Place it in MacDBG.app/Contents/Resources/models/
+            3. Restart MacDBG
+            
+            For now, you can use MacDBG's built-in debugging features:
+            • Process attachment and control
+            • Disassembly viewing
+            • Register and memory inspection
+            • Breakpoint management
+            """
         }
     }
     
