@@ -20,7 +20,25 @@ let package = Package(
         .target(
             name: "MacDBG",
             path: "src",
-            exclude: ["MacDBGApp.swift", "DebuggerViews.swift", "TestTarget.c"],
+            exclude: [
+                "MacDBGApp.swift", 
+                "DebuggerViews.swift", 
+                "TestTarget.c",
+                "DebuggerController_broken.swift",
+                "DebuggerController_old.swift", 
+                "DebuggerControllerFixed.swift",
+                "DisassemblyView_Basic.swift",
+                "DisassemblyView_Basic2.swift",
+                "DisassemblyView_Complex2.swift",
+                "DisassemblyView_Complex.swift",
+                "DisassemblyView_Minimal.swift",
+                "DisassemblyView_Minimal2.swift",
+                "DisassemblyView_Simple.swift",
+                "DisassemblyView_UltraSimple.swift",
+                "MinimalContentView.swift",
+                "MinimalDebuggerController.swift",
+                "DisassemblyView.swift.backup"
+            ],
             resources: [
                 .process("../../models")
             ]

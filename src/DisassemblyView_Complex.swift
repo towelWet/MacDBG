@@ -1,6 +1,6 @@
 import SwiftUI
 
-struct DisassemblyView: View {
+struct DisassemblyView_Complex: View {
     @ObservedObject var debugger: DebuggerController
     @ObservedObject var aiManager: AIModelManager
     @StateObject private var jumpTracker = JumpTracker()
@@ -172,8 +172,8 @@ struct DisassemblyView: View {
                             
                             // Main disassembly list - custom stack for precise row heights (optimized)
                             LazyVStack(alignment: .leading, spacing: 0) {
-                                // Render all instructions for proper scrolling
-                                ForEach(debugger.disassembly) { line in
+                                // Render all instructions for proper scrolling (limit to 1000 for performance)
+                                ForEach(Array(debugger.disassembly.prefix(1000))) { line in
                                                                     SimpleDisassemblyRow(
                                     line: line, 
                                     isActive: line.address == debugger.programCounter,
@@ -304,20 +304,28 @@ struct DisassemblyView: View {
         .onKeyPress(.init("l")) {
             // Cmd+L shortcut to send selected lines to AI chat
             if !selectedAddresses.isEmpty {
-                let selectedLines = debugger.disassembly.filter { selectedAddresses.contains($0.address) }
+                // Limit the number of selected lines to prevent performance issues
+                let maxLines = 50
+                let selectedLines = debugger.disassembly
+                    .filter { selectedAddresses.contains($0.address) }
+                    .sorted { $0.address < $1.address }
+                    .prefix(maxLines)
                 
                 if !selectedLines.isEmpty {
+                    debugger.addLog("🤖 Analyzing \(selectedLines.count) selected lines...")
+                    
                     Task {
                         let suggestion = await aiManager.analyzeCodeWithContext(
                             code: selectedLines.map { line in
                                 "\(line.formattedAddress) \(line.instruction) \(line.operands)"
                             }.joined(separator: "\n"),
                             question: "Analyze this code:",
-                            context: "Selected disassembly lines"
+                            context: "Selected disassembly lines (\(selectedLines.count) lines)"
                         )
                         
                         await MainActor.run {
                             aiManager.addSuggestion(suggestion)
+                            debugger.addLog("✅ AI analysis completed for selected lines")
                         }
                     }
                 }
@@ -772,24 +780,46 @@ private struct SimpleDisassemblyRow: View {
             searchMenu
             
             // AI Assistant section
+            Divider()
+            
+            Button("🤖 Send to AI Chat") {
+                Task {
+                    let suggestion = await aiManager.analyzeCodeWithContext(
+                        code: "\(line.formattedAddress) \(line.instruction) \(line.operands)",
+                        question: "Explain what this assembly instruction does:",
+                        context: "Single disassembly line analysis"
+                    )
+                    
+                    await MainActor.run {
+                        aiManager.addSuggestion(suggestion)
+                    }
+                }
+            }
+            
             if !selectedAddresses.isEmpty {
-                Divider()
-                
-                Button("🤖 Send to AI Chat") {
-                    let selectedLines = debugger.disassembly.filter { selectedAddresses.contains($0.address) }
+                Button("🤖 Send Selected to AI") {
+                    // Limit the number of selected lines to prevent performance issues
+                    let maxLines = 50
+                    let selectedLines = debugger.disassembly
+                        .filter { selectedAddresses.contains($0.address) }
+                        .sorted { $0.address < $1.address }
+                        .prefix(maxLines)
                     
                     if !selectedLines.isEmpty {
+                        debugger.addLog("🤖 Analyzing \(selectedLines.count) selected lines...")
+                        
                         Task {
                             let suggestion = await aiManager.analyzeCodeWithContext(
                                 code: selectedLines.map { line in
                                     "\(line.formattedAddress) \(line.instruction) \(line.operands)"
                                 }.joined(separator: "\n"),
                                 question: "Analyze this code:",
-                                context: "Selected disassembly lines"
+                                context: "Selected disassembly lines (\(selectedLines.count) lines)"
                             )
                             
                             await MainActor.run {
                                 aiManager.addSuggestion(suggestion)
+                                debugger.addLog("✅ AI analysis completed for selected lines")
                             }
                         }
                     }

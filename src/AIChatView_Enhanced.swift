@@ -145,44 +145,24 @@ struct AIChatView_Enhanced: View {
                 // Input field with send button
                 HStack(alignment: .bottom, spacing: 12) {
                     VStack(alignment: .leading, spacing: 4) {
-                        if #available(macOS 13.0, *) {
-                            TextField("Message AI Assistant...", text: $messageText, axis: .vertical)
-                                .textFieldStyle(.plain)
-                                .font(.body)
-                                .focused($isTextFieldFocused)
-                                .lineLimit(1...6)
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 12)
-                                .background(Color(NSColor.controlBackgroundColor))
-                                .cornerRadius(20)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 20)
-                                        .stroke(isTextFieldFocused ? Color.blue : Color.clear, lineWidth: 2)
-                                )
-                                .onSubmit {
-                                    if !messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                        sendMessage()
-                                    }
+                        SimpleChatTextField(
+                            text: $messageText,
+                            placeholder: "Message AI Assistant...",
+                            onSend: {
+                                if !messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                    sendMessage()
                                 }
-                        } else {
-                            TextField("Message AI Assistant...", text: $messageText)
-                                .textFieldStyle(.plain)
-                                .font(.body)
-                                .focused($isTextFieldFocused)
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 12)
-                                .background(Color(NSColor.controlBackgroundColor))
-                                .cornerRadius(20)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 20)
-                                        .stroke(isTextFieldFocused ? Color.blue : Color.clear, lineWidth: 2)
-                                )
-                                .onSubmit {
-                                    if !messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                        sendMessage()
-                                    }
-                                }
-                        }
+                            }
+                        )
+                        .focused($isTextFieldFocused)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                        .background(Color(NSColor.controlBackgroundColor))
+                        .cornerRadius(20)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 20)
+                                .stroke(isTextFieldFocused ? Color.blue : Color.clear, lineWidth: 2)
+                        )
                     }
                     
                     Button(action: sendMessage) {
@@ -202,6 +182,21 @@ struct AIChatView_Enhanced: View {
             RoundedRectangle(cornerRadius: 8)
                 .stroke(Color(NSColor.separatorColor), lineWidth: 1)
         )
+        .onAppear {
+            // Sync with AI manager's chat input when view appears
+            if !aiManager.chatInput.isEmpty {
+                messageText = aiManager.chatInput
+                aiManager.chatInput = "" // Clear after using
+            }
+        }
+        .onChange(of: aiManager.chatInput) { newValue in
+            // Update messageText when AI manager sets new chat input
+            if !newValue.isEmpty {
+                messageText = newValue
+                aiManager.chatInput = "" // Clear after using
+                isTextFieldFocused = true // Focus the text field
+            }
+        }
     }
     
     private func sendMessage() {
@@ -257,6 +252,83 @@ struct QuickActionButton: View {
             .cornerRadius(8)
         }
         .buttonStyle(.plain)
+    }
+}
+
+// Simple chat text field that handles Shift+Enter vs Enter properly
+struct SimpleChatTextField: NSViewRepresentable {
+    @Binding var text: String
+    let placeholder: String
+    let onSend: () -> Void
+    
+    func makeNSView(context: Context) -> NSTextView {
+        let textView = NSTextView()
+        
+        textView.delegate = context.coordinator
+        textView.isRichText = false
+        textView.isAutomaticQuoteSubstitutionEnabled = false
+        textView.isAutomaticDashSubstitutionEnabled = false
+        textView.isAutomaticTextReplacementEnabled = false
+        textView.isAutomaticSpellingCorrectionEnabled = false
+        textView.allowsUndo = true
+        textView.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        textView.string = text
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.textContainer?.widthTracksTextView = true
+        textView.textContainer?.containerSize = NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude)
+        textView.textContainer?.heightTracksTextView = false
+        textView.textContainer?.lineFragmentPadding = 0
+        textView.textContainerInset = NSSize(width: 0, height: 0)
+        textView.backgroundColor = NSColor.clear
+        
+        return textView
+    }
+    
+    func updateNSView(_ nsView: NSTextView, context: Context) {
+        if nsView.string != text {
+            let selectedRange = nsView.selectedRange()
+            nsView.string = text
+            nsView.setSelectedRange(selectedRange)
+        }
+    }
+    
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+    
+    class Coordinator: NSObject, NSTextViewDelegate {
+        let parent: SimpleChatTextField
+        
+        init(_ parent: SimpleChatTextField) {
+            self.parent = parent
+        }
+        
+        func textDidChange(_ notification: Notification) {
+            guard let textView = notification.object as? NSTextView else { return }
+            DispatchQueue.main.async {
+                self.parent.text = textView.string
+            }
+        }
+        
+        func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+            if commandSelector == #selector(NSResponder.insertNewline(_:)) {
+                // Check if Shift is currently pressed
+                if NSEvent.modifierFlags.contains(.shift) {
+                    // Shift+Enter: Insert newline at cursor position
+                    let selectedRange = textView.selectedRange()
+                    textView.insertText("\n", replacementRange: selectedRange)
+                    return true
+                } else {
+                    // Enter only: Send message
+                    DispatchQueue.main.async {
+                        self.parent.onSend()
+                    }
+                    return true
+                }
+            }
+            return false
+        }
     }
 }
 

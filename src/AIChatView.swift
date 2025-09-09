@@ -108,22 +108,14 @@ struct AIChatView: View {
             // Input Area
             VStack(spacing: 8) {
                 HStack {
-                    if #available(macOS 13.0, *) {
-                        TextField("Ask AI about the code...", text: $messageText, axis: .vertical)
-                            .textFieldStyle(.roundedBorder)
-                            .focused($isTextFieldFocused)
-                            .lineLimit(1...4)
-                            .onSubmit {
-                                sendMessage()
-                            }
-                    } else {
-                        TextField("Ask AI about the code...", text: $messageText)
-                            .textFieldStyle(.roundedBorder)
-                            .focused($isTextFieldFocused)
-                            .onSubmit {
-                                sendMessage()
-                            }
-                    }
+                    SimpleChatTextField(
+                        text: $messageText,
+                        placeholder: "Ask AI about the code...",
+                        onSend: {
+                            sendMessage()
+                        }
+                    )
+                    .focused($isTextFieldFocused)
                     
                     Button(action: sendMessage) {
                         Image(systemName: "paperplane.fill")
@@ -176,6 +168,21 @@ struct AIChatView: View {
             RoundedRectangle(cornerRadius: 4)
                 .stroke(Color(NSColor.separatorColor), lineWidth: 1)
         )
+        .onAppear {
+            // Sync with AI manager's chat input when view appears
+            if !aiManager.chatInput.isEmpty {
+                messageText = aiManager.chatInput
+                aiManager.chatInput = "" // Clear after using
+            }
+        }
+        .onChange(of: aiManager.chatInput) { newValue in
+            // Update messageText when AI manager sets new chat input
+            if !newValue.isEmpty {
+                messageText = newValue
+                aiManager.chatInput = "" // Clear after using
+                isTextFieldFocused = true // Focus the text field
+            }
+        }
     }
     
     private func sendMessage() {
@@ -321,6 +328,8 @@ struct ChatMessageView: View {
         }
     }
 }
+
+// SimpleChatTextField is defined in AIChatView_Enhanced.swift
 
 struct AIChatView_Previews: PreviewProvider {
     static var previews: some View {

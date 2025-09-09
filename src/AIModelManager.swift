@@ -11,6 +11,7 @@ public class AIModelManager: ObservableObject {
     @Published public var isLoading = false
     @Published public var lastError: String?
     @Published public var aiSuggestions: [AISuggestion] = []
+    @Published public var chatInput: String = ""
     
     // MARK: - Private Properties
     private let aiBridge: AIModelBridge
@@ -128,21 +129,30 @@ public class AIModelManager: ObservableObject {
     
     // MARK: - Text Generation
     public func generateText(prompt: String, maxTokens: Int = 512) async -> String {
-        guard isModelLoaded else {
+        print("🔍 AIModelManager: generateText called, isModelLoaded: \(isModelLoaded)")
+        
+        // Capture the model state to avoid main actor issues
+        let modelLoaded = await MainActor.run { isModelLoaded }
+        
+        guard modelLoaded else {
+            print("🔍 AIModelManager: Model not loaded, using fallback response")
             // Provide helpful fallback responses instead of just error messages
             return generateFallbackResponse(for: prompt)
         }
         
         macdbgLog("🤖 Generating AI response for prompt: \(prompt.prefix(50))...", category: .system)
         
+        // Run AI generation on background thread to prevent UI blocking
         return await withCheckedContinuation { continuation in
-            aiBridge.generateTextAsync(prompt, maxTokens: Int32(maxTokens)) { result in
-                if let result = result, !result.isEmpty {
-                    macdbgLog("✅ AI generation completed successfully", category: .system)
-                    continuation.resume(returning: result)
-                } else {
-                    macdbgLog("❌ AI generation returned empty result", category: .error)
-                    continuation.resume(returning: "Error: AI model returned empty response")
+            DispatchQueue.global(qos: .userInitiated).async {
+                self.aiBridge.generateTextAsync(prompt, maxTokens: Int32(maxTokens)) { result in
+                    if let result = result, !result.isEmpty {
+                        macdbgLog("✅ AI generation completed successfully", category: .system)
+                        continuation.resume(returning: result)
+                    } else {
+                        macdbgLog("❌ AI generation returned empty result", category: .error)
+                        continuation.resume(returning: "Error: AI model returned empty response")
+                    }
                 }
             }
         }
@@ -371,7 +381,10 @@ public class AIModelManager: ObservableObject {
     
     // MARK: - Suggestion Management
     public func addSuggestion(_ suggestion: AISuggestion) {
+        print("🔍 AIModelManager: Adding suggestion - \(suggestion.title)")
+        print("🔍 AIModelManager: Content length: \(suggestion.content.count) characters")
         aiSuggestions.append(suggestion)
+        print("🔍 AIModelManager: Total suggestions now: \(aiSuggestions.count)")
         
         // Keep only the last 50 suggestions
         if aiSuggestions.count > 50 {
@@ -400,6 +413,11 @@ public class AIModelManager: ObservableObject {
     }
     
     public func analyzeCodeWithContext(code: String, question: String, context: String) async -> AISuggestion {
+        print("🔍 AIModelManager: analyzeCodeWithContext called")
+        print("🔍 AIModelManager: Code length: \(code.count) characters")
+        print("🔍 AIModelManager: Question: \(question)")
+        print("🔍 AIModelManager: Context: \(context)")
+        
         let prompt = """
         Context: \(context)
         
@@ -411,7 +429,12 @@ public class AIModelManager: ObservableObject {
         Please provide a detailed analysis.
         """
         
+        print("🔍 AIModelManager: Generated prompt length: \(prompt.count) characters")
+        print("🔍 AIModelManager: Calling generateText...")
+        
         let response = await generateText(prompt: prompt)
+        
+        print("🔍 AIModelManager: generateText returned, response length: \(response.count) characters")
         
         return AISuggestion(
             id: UUID(),
@@ -424,6 +447,27 @@ public class AIModelManager: ObservableObject {
     
     public func removeSuggestion(_ suggestion: AISuggestion) {
         aiSuggestions.removeAll { $0.id == suggestion.id }
+    }
+    
+    // MARK: - Chat Input Management
+    public func prepareCodeForChat(code: String, context: String) {
+        print("🔍 AIModelManager: prepareCodeForChat called")
+        print("🔍 AIModelManager: Code length: \(code.count) characters")
+        print("🔍 AIModelManager: Context: \(context)")
+        
+        // Format the code for the chat input
+        let formattedInput = """
+        \(context)
+        
+        ```assembly
+        \(code)
+        ```
+        
+        Please analyze this assembly code:
+        """
+        
+        chatInput = formattedInput
+        print("🔍 AIModelManager: Chat input prepared, length: \(chatInput.count) characters")
     }
     
     // MARK: - Configuration
