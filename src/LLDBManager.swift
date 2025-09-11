@@ -10,6 +10,7 @@ protocol LLDBManagerDelegate: AnyObject {
     func lldbManagerDidReceiveError(error: LLDBErrorEvent) async
     func lldbManagerDidReceiveBreakpointResponse(response: [String: Any]) async
     func lldbManagerDidReceiveWriteByteResponse(success: Bool, error: String?) async
+    func lldbManagerDidReceiveStringReferences(response: LLDBStringReferencesResponse) async
 }
 
 /// Manages the `lldb_server.py` script, providing a high-level interface for debugging.
@@ -258,6 +259,35 @@ class LLDBManager {
                 let response = try decoder.decode(LLDBWriteByteResponse.self, from: payloadData)
                 Task { @MainActor in
                     await delegate?.lldbManagerDidReceiveWriteByteResponse(success: response.success, error: response.error)
+                }
+            case .string_references:
+                // Parse the string references response using AnyCodable
+                do {
+                    let rawResponse = try decoder.decode(AnyCodable.self, from: payloadData)
+                    if let responseDict = rawResponse.value as? [String: Any],
+                       let payload = responseDict["payload"] as? [String: Any],
+                       let stringAddress = payload["string_address"] as? UInt64,
+                       let referencesArray = payload["references"] as? [[String: Any]],
+                       let count = payload["count"] as? Int {
+                        
+                        let references = referencesArray.compactMap { refDict -> StringReference? in
+                            guard let address = refDict["address"] as? UInt64,
+                                  let instruction = refDict["instruction"] as? String,
+                                  let module = refDict["module"] as? String else {
+                                return nil
+                            }
+                            return StringReference(address: address, instruction: instruction, module: module)
+                        }
+                        
+                        let payload = StringReferencesPayload(stringAddress: stringAddress, references: references, count: count)
+                        let response = LLDBStringReferencesResponse(payload: payload)
+                        
+                        Task { @MainActor in
+                            await delegate?.lldbManagerDidReceiveStringReferences(response: response)
+                        }
+                    }
+                } catch {
+                    print("Failed to parse string references response: \(error)")
                 }
             case .error:
                 let errorEvent = try decoder.decode(LLDBErrorEvent.self, from: payloadData)

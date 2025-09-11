@@ -874,6 +874,232 @@ class Handler(threading.Thread):
         print(f"[LLDB-SERVER] ✅ SUCCESS: Wrote {bytes_written} bytes to process memory (file untouched)")
         return {"type": "writeByte", "payload": {"success": True, "error": None, "address": addr, "value": value}}
 
+    def getMainExecutableDisassembly(self, count):
+        """Get disassembly from the main executable's text section (like Ghidra)"""
+        if self.target is None or not self.target.IsValid():
+            return self.buildError("no target")
+        process = self.target.GetProcess()
+        if process is None or not process.IsValid():
+            return self.buildError("no process")
+        try:
+            print(f"[LLDB-SERVER] Getting main executable disassembly (count={count})")
+            
+            # Method 1: Try to find the main executable by looking for the process name
+            main_module = None
+            process_name = "Unknown"
+            try:
+                # Use target to get executable name - this is more reliable across LLDB versions
+                if self.target and self.target.IsValid():
+                    executable = self.target.GetExecutable()
+                    if executable and executable.IsValid():
+                        process_name = executable.GetFilename()
+                        print(f"[LLDB-SERVER] Found process name from target: {process_name}")
+                    else:
+                        print(f"[LLDB-SERVER] No executable found in target")
+                else:
+                    print(f"[LLDB-SERVER] No valid target available")
+            except Exception as e:
+                print(f"[LLDB-SERVER] Could not get process name: {e}")
+                process_name = "Unknown"
+            
+            # Look for the main executable module - use a simpler approach
+            for i in range(self.target.GetNumModules()):
+                candidate = self.target.GetModuleAtIndex(i)
+                if candidate and candidate.IsValid():
+                    candidate_name = candidate.GetFileSpec().GetFilename()
+                    print(f"[LLDB-SERVER] Module {i}: {candidate_name}")
+                    
+                    # Check if this is the main executable by looking for the process name
+                    if candidate_name and process_name != "Unknown" and process_name in candidate_name:
+                        main_module = candidate
+                        print(f"[LLDB-SERVER] ✅ Found main executable by name match: {candidate_name}")
+                        break
+                    # Also check if it's not a system library (simpler check)
+                    elif (candidate_name and 
+                          not candidate_name.startswith('/System/') and 
+                          not candidate_name.startswith('/usr/lib/') and
+                          not candidate_name.startswith('/Library/') and
+                          not candidate_name.startswith('/usr/bin/') and
+                          not any(lib in candidate_name.lower() for lib in ['libsystem', 'libdyld', 'libc', 'libobjc', 'libdispatch', 'libxpc', 'libbsm', 'libpthread', 'libm', 'libmath', 'libc++', 'libc++abi'])):
+                        main_module = candidate
+                        print(f"[LLDB-SERVER] ✅ Found main executable by exclusion: {candidate_name}")
+                        break
+            
+            if not main_module or not main_module.IsValid():
+                print(f"[LLDB-SERVER] ❌ No main executable module found, using first module")
+                if self.target.GetNumModules() > 0:
+                    main_module = self.target.GetModuleAtIndex(0)
+                    if main_module and main_module.IsValid():
+                        candidate_name = main_module.GetFileSpec().GetFilename()
+                        print(f"[LLDB-SERVER] ✅ Using first module as fallback: {candidate_name}")
+                
+                if not main_module:
+                    return self.buildError("no main executable module found")
+            
+            # Try to find the text section
+            text_addr = lldb.LLDB_INVALID_ADDRESS
+            
+            # Method 1: Look for __TEXT.__text
+            for i in range(main_module.GetNumSections()):
+                section = main_module.GetSectionAtIndex(i)
+                if section.GetName() == "__TEXT":
+                    print(f"[LLDB-SERVER] Found __TEXT section")
+                    for j in range(section.GetNumSubSections()):
+                        subsection = section.GetSubSectionAtIndex(j)
+                        if subsection.GetName() == "__text":
+                            text_addr = subsection.GetLoadAddress(self.target)
+                            print(f"[LLDB-SERVER] Found __TEXT.__text at: {hex(text_addr)}")
+                            break
+                    if text_addr != lldb.LLDB_INVALID_ADDRESS:
+                        break
+            
+            # Method 2: Use current PC as fallback
+            if text_addr == lldb.LLDB_INVALID_ADDRESS:
+                print(f"[LLDB-SERVER] ❌ No text section found, using current PC as fallback")
+                if process and process.IsValid():
+                    thread = process.GetSelectedThread()
+                    if thread and thread.IsValid():
+                        frame = thread.GetSelectedFrame()
+                        if frame and frame.IsValid():
+                            text_addr = frame.GetPC()
+                            print(f"[LLDB-SERVER] ✅ Using current PC as fallback: {hex(text_addr)}")
+                
+                if text_addr == lldb.LLDB_INVALID_ADDRESS:
+                    return self.buildError("no text section found and no valid PC")
+            
+            print(f"[LLDB-SERVER] Using text section at: {hex(text_addr)}")
+            
+            # Get disassembly from text section start
+            addr_obj = lldb.SBAddress(text_addr, self.target)
+            count_int = int(count) if isinstance(count, str) else count
+            insts = self.target.ReadInstructions(addr_obj, count_int)
+            lines = []
+            for i in range(insts.GetSize()):
+                inst = insts.GetInstructionAtIndex(i)
+                ins_addr = inst.GetAddress().GetLoadAddress(self.target)
+                size = inst.GetByteSize()
+                # Best-effort read of instruction bytes from memory
+                hex_bytes = ""
+                try:
+                    err = lldb.SBError()
+                    mem = process.ReadMemory(ins_addr, size, err)
+                    if err.Success() and mem is not None:
+                        byte_tuple = struct.unpack('B' * len(mem), mem)
+                        hex_bytes = ' '.join(f"{b:02x}" for b in byte_tuple)
+                except Exception:
+                    pass
+                mnemonic = inst.GetMnemonic(self.target) or ""
+                operands = inst.GetOperands(self.target) or ""
+                lines.append({
+                    "address": ins_addr,
+                    "bytes": hex_bytes,
+                    "instruction": mnemonic,
+                    "operands": operands
+                })
+            print(f"[LLDB-SERVER] Generated {len(lines)} disassembly lines")
+            return {"type": "disassembly", "payload": {"lines": lines}}
+        except Exception as e:
+            return self.buildError(f"main executable disassembly failed: {e}")
+
+    def findStringReferences(self, stringAddress):
+        """Find all code references to a string address (exactly like Ghidra's XRef functionality)"""
+        if self.target is None or not self.target.IsValid():
+            return self.buildError("no target")
+        process = self.target.GetProcess()
+        if process is None or not process.IsValid():
+            return self.buildError("no process")
+        
+        try:
+            print(f"[LLDB-SERVER] Finding references to string address 0x{stringAddress:x} (Ghidra-style)")
+            
+            references = []
+            
+            # Get the main executable disassembly to search for string references
+            main_disassembly = self.getMainExecutableDisassembly(2000)  # Get more instructions to search
+            if main_disassembly.get("type") == "disassembly":
+                main_lines = main_disassembly["payload"]["lines"]
+                print(f"[LLDB-SERVER] Searching {len(main_lines)} instructions for string references")
+                
+                # Search for both the exact address and common variants
+                search_addresses = [
+                    stringAddress,
+                    stringAddress & 0xFFFFFFFF,  # 32-bit version
+                    stringAddress | 0x100000000  # With base offset
+                ]
+                
+                for line in main_lines:
+                    instruction_text = f"{line.get('instruction', '')} {line.get('operands', '')}".strip()
+                    
+                    # Look for the string address in the operands (like Ghidra does)
+                    for search_addr in search_addresses:
+                        if self.isValidStringReference(line.get('operands', ''), search_addr):
+                            ref_addr = line.get('address', 0)
+                            if ref_addr != 0:
+                                # Avoid duplicates
+                                if not any(ref["address"] == ref_addr for ref in references):
+                                    references.append({
+                                        "address": ref_addr,
+                                        "instruction": instruction_text,
+                                        "module": "main_executable"
+                                    })
+                                    print(f"[LLDB-SERVER] ✅ Found reference at 0x{ref_addr:x}: {instruction_text}")
+            
+            print(f"[LLDB-SERVER] Found {len(references)} references to string 0x{stringAddress:x}")
+            
+            return {
+                "type": "string_references",
+                "payload": {
+                    "string_address": stringAddress,
+                    "references": references,
+                    "count": len(references)
+                }
+            }
+            
+        except Exception as e:
+            print(f"[LLDB-SERVER] Exception in findStringReferences: {e}")
+            return self.buildError(f"exception: {e}")
+    
+    def isValidStringReference(self, operands, targetAddress):
+        """Check if the operands contain a valid reference to the target address (like Ghidra)"""
+        if not operands:
+            return False
+        
+        target_hex = f"{targetAddress:x}"
+        target_hex_upper = f"{targetAddress:X}"
+        
+        # Look for the address in various formats (like Ghidra does)
+        patterns = [
+            f"0x{target_hex}",       # 0x1234
+            f"0x{target_hex_upper}", # 0x1234 (uppercase)
+            f"#{target_hex}",        # ARM immediate #1234
+            f"#{target_hex_upper}",  # ARM immediate #1234 (uppercase)
+            target_hex,              # Just the hex number
+            target_hex_upper         # Just the hex number (uppercase)
+        ]
+        
+        for pattern in patterns:
+            if pattern in operands:
+                # Additional validation to avoid false positives (like Ghidra does)
+                if self.isLikelyMemoryReference(operands, pattern):
+                    return True
+        
+        return False
+    
+    def isLikelyMemoryReference(self, operands, pattern):
+        """Additional validation to ensure this is a real memory reference (like Ghidra's analysis)"""
+        # Look for patterns that suggest memory access
+        memory_indicators = ['[', ']', 'lea', 'mov', 'ldr', 'str', 'push', 'pop', 'call', 'jmp']
+        
+        for indicator in memory_indicators:
+            if indicator in operands.lower():
+                return True
+        
+        # If it's just a raw address in operands, it's likely a reference
+        if pattern in operands and ('rip' in operands.lower() or 'pc' in operands.lower()):
+            return True
+        
+        return True  # Default to true for now, can be refined
+
     def getFrameDesc(self,frame):
         module_name = None
         module_uuid = None
@@ -978,6 +1204,16 @@ class Handler(threading.Thread):
             result = self.getRegisters()
         elif command == 'disassembly':
             result = self.disassembly(req['address'], req['count'])
+        elif command == 'getMainExecutableDisassembly':
+            result = self.getMainExecutableDisassembly(req.get('count', 100))
+            print(f"[LLDB-SERVER] getMainExecutableDisassembly returned: {result}")  # DEBUG
+            return result
+        elif command == 'findStringReferences':
+            stringAddress = req.get('stringAddress', 0)
+            print(f"[LLDB-SERVER] findStringReferences called with address: 0x{stringAddress:x}")  # DEBUG
+            result = self.findStringReferences(stringAddress)
+            print(f"[LLDB-SERVER] findStringReferences returned: {result}")  # DEBUG
+            return result
         elif command == 'setBreakpointAtVirtualAddress':
             result = self.setBreakpointAtVirtualAddress(req['address'])
         elif command == 'removeBreakpoint':

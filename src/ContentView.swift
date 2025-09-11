@@ -130,9 +130,17 @@ struct ContentView: View {
                 .roundedBorder()
             }
             
-            // Right section - Registers and Debug Log
+            // Right section - Strings, XRefs, Registers, and Debug Log
             VSplitView {
-                // Top right - Registers
+                // Top right - Strings (like Ghidra)
+                StringsView(debugger: debugger)
+                    .roundedBorder()
+                
+                // Middle right - Cross-References (like Ghidra)
+                XRefsView(debugger: debugger)
+                    .roundedBorder()
+                
+                // Bottom middle right - Registers (compact)
                 VStack(spacing: 0) {
                     HStack {
                         Text("Registers")
@@ -155,32 +163,10 @@ struct ContentView: View {
                 }
                 .roundedBorder()
                 
-                // Bottom right - DEBUG LOG (RESTORED!)
-                VStack(spacing: 0) {
-                    HStack {
-                        Text("Debug Log")
-                            .font(.headline)
-                            .fontWeight(.semibold)
-                        Spacer()
-                        Button("Clear") {
-                            debugger.logs.removeAll()
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        
-                        Button("Export") {
-                            showingExportDialog = true
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(Color(NSColor.controlBackgroundColor))
-                    
-                    LogView(debugger: debugger)
-                }
-                .roundedBorder()
+                // Bottom right - Debug Log
+                LogView(debugger: debugger)
+                    .roundedBorder()
+                    .frame(minHeight: 150)
             }
             .frame(minWidth: 300, maxWidth: 400)
         }

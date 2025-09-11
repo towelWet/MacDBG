@@ -27,6 +27,11 @@ public class DebuggerController: ObservableObject, LLDBManagerDelegate {
     @Published public var navigationTarget: UInt64? = nil
     @Published public var status: String = "Ready"
     
+    // MARK: - String Analysis (Ghidra-style)
+    @Published public var strings: [StringData] = []
+    @Published public var stringReferences: [StringReference] = []
+    @Published public var selectedStringAddress: UInt64? = nil
+    
     // MARK: - Private State
     private var breakpointIDs: [UInt64: Int] = [:]
     private var pendingBreakpointAddress: UInt64?
@@ -166,6 +171,9 @@ public class DebuggerController: ObservableObject, LLDBManagerDelegate {
         // Try to get the executable path for the process
         let executablePath = await getExecutablePath(for: pid) ?? "/usr/bin/true"
         logger.log("📁 Using executable path: \(executablePath)", category: .lldb)
+        
+        // Set the attached process path for string extraction
+        attachedProcessPath = executablePath
         
         lldbManager.sendCommand(command: "attachToProcess", args: ["pid": pid, "executable": executablePath, "is64Bits": true])
     }
@@ -499,6 +507,15 @@ extension DebuggerController {
                     self.lldbManager.getDisassembly(from: rip, count: 100)
                 }
             }
+            
+            // Auto-extract strings after successful attachment (like Ghidra)
+            if self.isAttached && self.attachedProcessPath != nil && self.strings.isEmpty {
+                Task {
+                    // Small delay to let everything settle
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    await self.extractStrings()
+                }
+            }
         }
     }
     
@@ -688,6 +705,9 @@ extension DebuggerController {
         let executablePath = await getExecutablePath(for: pid) ?? "/usr/bin/true"
         logger.log("📁 Using executable path: \(executablePath)", category: .lldb)
         
+        // Set the attached process path for string extraction
+        attachedProcessPath = executablePath
+        
         lldbManager.sendCommand(command: "attachToProcess", args: ["pid": pid, "executable": executablePath, "is64Bits": true])
         addLog("🎯 Attaching to PID: \(pid)")
         logger.log("✅ Attach command sent successfully for PID \(pid)", category: .lldb)
@@ -725,8 +745,10 @@ extension DebuggerController {
         addLog("📈 Expanding disassembly range: \(direction)")
     }
     
-    public func getDisassemblyAt(address: UInt64) async {
-        lldbManager.sendCommand(command: "getDisassembly", args: ["address": String(format: "0x%llx", address)])
+    public func getDisassemblyAt(address: UInt64, count: Int = 200) async {
+        // Use getMainExecutableDisassembly for string navigation (like earlier fix)
+        lldbManager.sendCommand(command: "getMainExecutableDisassembly", args: ["count": count])
+        addLog("🎯 Requesting disassembly around address: 0x\(String(format: "%llx", address))")
     }
     
     public func writeBytes(address: UInt64, bytes: [UInt8]) async {
@@ -754,6 +776,119 @@ extension DebuggerController {
     public func navigateToAddress(_ address: UInt64) async {
         navigationTarget = address
         addLog("🧭 Navigating to address: 0x\(String(format: "%llx", address))")
+    }
+    
+    // MARK: - String Analysis (Ghidra-style Implementation)
+    
+    /// Extract strings from the attached process (like Ghidra's string analysis)
+    public func extractStrings() async {
+        guard isAttached, let processPath = attachedProcessPath else {
+            addLog("❌ No process attached for string extraction")
+            return
+        }
+        
+        addLog("🔍 Extracting strings from process...")
+        
+        // Simple file-based string extraction for now
+        // TODO: Implement LLDB-based memory string extraction
+        let extractedStrings = await extractStringsFromBinary(path: processPath)
+        
+        await MainActor.run {
+            self.strings = extractedStrings
+            addLog("✅ Extracted \(extractedStrings.count) strings")
+        }
+    }
+    
+    /// Navigate to the first code reference of a string (like Ghidra's "Go To" functionality)
+    public func navigateToStringReference(_ stringAddress: UInt64) {
+        print("🎯 CRITICAL: Finding FIRST code reference to string 0x\(String(format: "%llx", stringAddress))")
+        selectedStringAddress = stringAddress
+        
+        // Send command to find string references
+        lldbManager.sendCommand(command: "findStringReferences", args: ["stringAddress": stringAddress])
+    }
+    
+    /// Find all code references to a string (like Ghidra's XRef functionality)
+    public func findStringReferences(_ stringAddress: UInt64) {
+        print("🎯 Finding ALL references to string 0x\(String(format: "%llx", stringAddress))")
+        selectedStringAddress = stringAddress
+        
+        // Send command to find string references
+        lldbManager.sendCommand(command: "findStringReferences", args: ["stringAddress": stringAddress])
+    }
+    
+    /// Handle string references response from LLDB server
+    func lldbManagerDidReceiveStringReferences(response: LLDBStringReferencesResponse) async {
+        await MainActor.run {
+            addLog("🔍 Found \(response.payload.count) string references")
+            
+            // Update string references for XRef panel
+            stringReferences = response.payload.references
+            
+            // If we have references, navigate to the first one (like Ghidra)
+            if let firstRef = response.payload.references.first {
+                addLog("🎯 Navigating to first reference at 0x\(String(format: "%llx", firstRef.address))")
+                Task {
+                    await navigateToAddress(firstRef.address)
+                }
+            } else {
+                addLog("❌ No references found for string 0x\(String(format: "%llx", response.payload.stringAddress))")
+            }
+        }
+    }
+    
+    /// Simple file-based string extraction (temporary implementation)
+    private func extractStringsFromBinary(path: String) async -> [StringData] {
+        return await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .background).async {
+                var strings: [StringData] = []
+                
+                do {
+                    let data = try Data(contentsOf: URL(fileURLWithPath: path))
+                    let bytes = Array(data)
+                    
+                    var currentString = ""
+                    var startOffset = 0
+                    let baseAddress: UInt64 = 0x100000000  // Typical macOS base address
+                    
+                    for (i, byte) in bytes.enumerated() {
+                        if byte >= 32 && byte <= 126 { // Printable ASCII
+                            if currentString.isEmpty {
+                                startOffset = i
+                            }
+                            if let scalar = UnicodeScalar(Int(byte)) {
+                                currentString += String(Character(scalar))
+                            }
+                        } else {
+                            if currentString.count >= 4 { // Minimum string length
+                                let stringData = StringData(
+                                    address: baseAddress + UInt64(startOffset),
+                                    content: currentString,
+                                    length: currentString.count
+                                )
+                                strings.append(stringData)
+                            }
+                            currentString = ""
+                        }
+                    }
+                    
+                    // Don't forget the last string
+                    if currentString.count >= 4 {
+                        let stringData = StringData(
+                            address: baseAddress + UInt64(startOffset),
+                            content: currentString,
+                            length: currentString.count
+                        )
+                        strings.append(stringData)
+                    }
+                    
+                } catch {
+                    print("Error reading binary file: \(error)")
+                }
+                
+                continuation.resume(returning: strings)
+            }
+        }
     }
 }
 

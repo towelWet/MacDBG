@@ -165,6 +165,7 @@ struct LLDBMessage: Decodable {
         case memory
         case error
         case writeByte
+        case string_references
     }
 }
 
@@ -276,6 +277,60 @@ struct AnyCodable: Codable {
     // Helper initializer to wrap a value
     init(value: Any) {
         self.value = value
+    }
+}
+
+// MARK: - String Analysis (Ghidra-style)
+
+/// String data structure (like Ghidra's string analysis)
+public struct StringData: Identifiable, Equatable {
+    public let id = UUID()
+    public let address: UInt64
+    public let content: String
+    public let length: Int
+    
+    public init(address: UInt64, content: String, length: Int) {
+        self.address = address
+        self.content = content
+        self.length = length
+    }
+}
+
+/// String reference structure (like Ghidra's cross-references)
+public struct StringReference: Identifiable, Equatable {
+    public let id = UUID()
+    public let address: UInt64
+    public let instruction: String
+    public let module: String
+    
+    public init(address: UInt64, instruction: String, module: String) {
+        self.address = address
+        self.instruction = instruction
+        self.module = module
+    }
+}
+
+// MARK: - LLDB Response Models
+
+/// Response structure for string references from LLDB server
+public struct LLDBStringReferencesResponse {
+    public let payload: StringReferencesPayload
+    
+    public init(payload: StringReferencesPayload) {
+        self.payload = payload
+    }
+}
+
+/// Payload for string references response
+public struct StringReferencesPayload {
+    public let stringAddress: UInt64
+    public let references: [StringReference]
+    public let count: Int
+    
+    public init(stringAddress: UInt64, references: [StringReference], count: Int) {
+        self.stringAddress = stringAddress
+        self.references = references
+        self.count = count
     }
 }
 

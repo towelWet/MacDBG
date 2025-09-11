@@ -35,6 +35,8 @@ swiftc -O -whole-module-optimization \
     "$SRC_DIR/ContentView.swift" \
     "$SRC_DIR/DebuggerController.swift" \
     "$SRC_DIR/DisassemblyView.swift" \
+    "$SRC_DIR/StringsView.swift" \
+    "$SRC_DIR/XRefsView.swift" \
     "$SRC_DIR/JumpTracker.swift" \
     "$SRC_DIR/JumpVisualizationView.swift" \
     "$SRC_DIR/DebugControlsView.swift" \
@@ -46,7 +48,7 @@ swiftc -O -whole-module-optimization \
     "$SRC_DIR/LLDBManager.swift" \
     "$SRC_DIR/DataModels.swift" \
     "$SRC_DIR/InstructionAssembler.swift" \
-           "$SRC_DIR/AIModelManager.swift" \
+       "$SRC_DIR/AIModelManager.swift" \
            "$SRC_DIR/AIAssistantView.swift" \
            "$SRC_DIR/AIChatView.swift" \
            "$SRC_DIR/AIChatView_Enhanced.swift" \

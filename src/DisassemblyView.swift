@@ -139,6 +139,36 @@ struct DisassemblyView: View {
                             proxy.scrollTo(debugger.programCounter, anchor: .center)
                         }
                     }
+                    .onChange(of: debugger.navigationTarget) { target in
+                        // Handle string navigation (like Ghidra's "Go To" functionality)
+                        if let targetAddress = target {
+                            print("🎯 DisassemblyView: Navigating to target address 0x\(String(format: "%llx", targetAddress))")
+                            
+                            // First check if the address is already in our disassembly
+                            if debugger.disassembly.contains(where: { $0.address == targetAddress }) {
+                                // Address is already visible, just scroll to it
+                                withAnimation(.easeInOut(duration: 0.3)) {
+                                    proxy.scrollTo(targetAddress, anchor: .center)
+                                }
+                                print("🎯 Scrolled to existing address in disassembly")
+                            } else {
+                                // Address not visible, request disassembly at that location
+                                print("🎯 Address not in current disassembly, requesting new disassembly")
+                                Task {
+                                    await debugger.getDisassemblyAt(address: targetAddress, count: 200)
+                                    // After we get new disassembly, scroll to the target
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                                        withAnimation(.easeInOut(duration: 0.3)) {
+                                            proxy.scrollTo(targetAddress, anchor: .center)
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            // Clear the navigation target after handling
+                            debugger.navigationTarget = nil
+                        }
+                    }
                 }
             }
         }
