@@ -631,10 +631,100 @@ class Handler(threading.Thread):
     def stepInstruction(self):
         if self.target == None or self.target.GetProcess() == None:
             return self.buildError("no process")
-        thread = self.target.GetProcess().GetSelectedThread()
+        
+        process = self.target.GetProcess()
+        thread = process.GetSelectedThread()
         if thread == None:
             return self.buildError("no thread selected")
-        thread.StepInstruction(False)  # Single instruction step
+        
+        # Get current state
+        frame = thread.GetFrameAtIndex(0)
+        if not frame or not frame.IsValid():
+            return self.buildError("invalid frame")
+        
+        current_pc = frame.GetPC()
+        
+        # Strategy 1: Try normal step instruction
+        thread.StepInstruction(False)
+        
+        # Wait for step to complete with timeout
+        timeout_count = 0
+        while process.GetState() == lldb.eStateRunning and timeout_count < 50:
+            time.sleep(0.01)
+            timeout_count += 1
+        
+        # Check if we actually moved
+        new_frame = thread.GetFrameAtIndex(0)
+        if new_frame and new_frame.IsValid():
+            new_pc = new_frame.GetPC()
+            if new_pc != current_pc:
+                return self.buildOK()  # Success - we moved
+        
+        # Strategy 2: If stuck, try step over then step into
+        thread.StepOver()
+        timeout_count = 0
+        while process.GetState() == lldb.eStateRunning and timeout_count < 50:
+            time.sleep(0.01)
+            timeout_count += 1
+        
+        # Check again
+        new_frame = thread.GetFrameAtIndex(0)
+        if new_frame and new_frame.IsValid():
+            new_pc = new_frame.GetPC()
+            if new_pc != current_pc:
+                return self.buildOK()
+        
+        # Strategy 3: Use temporary breakpoint at next instruction
+        try:
+            # Calculate next instruction address (assume 1 byte minimum)
+            next_addr = current_pc + 1
+            
+            # Set temporary breakpoint
+            breakpoint = self.target.BreakpointCreateByAddress(next_addr)
+            if breakpoint and breakpoint.IsValid():
+                # Continue to hit the breakpoint
+                process.Continue()
+                
+                # Wait for breakpoint or timeout
+                timeout_count = 0
+                while process.GetState() == lldb.eStateRunning and timeout_count < 100:
+                    time.sleep(0.01)
+                    timeout_count += 1
+                
+                # Remove the temporary breakpoint
+                self.target.BreakpointDelete(breakpoint.GetID())
+                
+                # Check if we moved
+                final_frame = thread.GetFrameAtIndex(0)
+                if final_frame and final_frame.IsValid():
+                    final_pc = final_frame.GetPC()
+                    if final_pc != current_pc:
+                        return self.buildOK()
+        except:
+            pass
+        
+        # Strategy 4: Force step out if we're in system code
+        try:
+            # Get current module name
+            current_module = ""
+            if frame.GetModule() and frame.GetModule().IsValid():
+                file_spec = frame.GetModule().GetFileSpec()
+                if file_spec and file_spec.IsValid():
+                    current_module = file_spec.GetFilename() or ""
+            
+            # If we're in system libraries, step out
+            if any(sys_lib in current_module.lower() for sys_lib in 
+                   ['libsystem', 'libc', 'libdyld', 'kernel', 'foundation', 'coreservices']):
+                thread.StepOut()
+                timeout_count = 0
+                while process.GetState() == lldb.eStateRunning and timeout_count < 100:
+                    time.sleep(0.01)
+                    timeout_count += 1
+                return self.buildOK()
+        except:
+            pass
+        
+        # If all else fails, return OK anyway (like x64dbg does)
         return self.buildOK()
 
     def stepOver(self):

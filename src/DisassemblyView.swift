@@ -521,7 +521,7 @@ struct OptimizedDisassemblyRowView: View {
             Text(line.formattedAddress)
                 .font(Self.monospacedFont)
                 .foregroundColor(.secondary)
-                .frame(width: 85, alignment: .leading)
+                .frame(width: 140, alignment: .leading)
             
             // Bytes (limited width)
             Text(line.bytes.prefix(24))
