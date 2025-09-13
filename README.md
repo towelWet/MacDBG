@@ -114,31 +114,6 @@ MacDBG/
 ├── models/                       # AI model files
 │   ├── README.md                # Model documentation
 │   └── qwen2.5-coder-3b-instruct-q4_0.gguf  # AI model file
-├── Patterns/                     # Development utilities & patterns
-│   ├── git/                      # Git workflow patterns
-│   │   ├── GitDeletion.txt      # Git deletion patterns
-│   │   ├── GitHubLargeFilesSolution.txt  # Large file handling
-│   │   ├── GitMove.txt          # Git move patterns
-│   │   └── GitUpdate.txt        # Git update patterns
-│   ├── listfiles/                # File listing utilities
-│   │   ├── 1/                   # Version 1 patterns
-│   │   │   ├── listfiles.bat    # Windows batch script
-│   │   │   └── listfiles.sh     # Unix shell script
-│   │   ├── 2/                   # Version 2 patterns
-│   │   │   └── listfiles.bat    # Windows batch script
-│   │   └── 3/                   # Version 3 patterns
-│   │       └── listfiles.sh     # Unix shell script
-│   ├── run-stop/                 # Run/stop utilities
-│   │   ├── run/                 # Run scripts
-│   │   │   ├── run.bat          # Windows run script
-│   │   │   └── run.sh           # Unix run script
-│   │   └── stop/                # Stop scripts
-│   │       ├── stop.bat         # Windows stop script
-│   │       └── stop.sh          # Unix stop script
-│   ├── Icon                     # Icon resources
-│   ├── Towel Design.txt         # Design documentation
-│   ├── temp_.bat                # Temporary batch script
-│   └── temp_.sh                 # Temporary shell script
 ├── test_program.dSYM/            # Debug symbols for test program
 │   └── Contents/                 # Debug symbol contents
 │       ├── Info.plist           # Debug symbol info
