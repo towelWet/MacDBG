@@ -1,0 +1,42 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Swift / SPM
+.build/
+.build-*/
+.swiftpm/
+Package.resolved
+
+# Xcode (if opened as an Xcode project at any point)
+DerivedData/
+xcuserdata/
+*.xcworkspace/
+*.xcodeproj/project.xcworkspace/
+*.xcodeproj/xcuserdata/
+
+# App bundles and binaries
+MacDBG.app/
+macdbg_cli
+*.dSYM/
+
+# AI Models and large binaries (keep models folder but exclude large GGUF files)
+models/*.gguf
+
+# Reference implementations and large dependencies
+gpt4all-reference/
+gpt4all-backend/
+
+# Logs and caches
+*.log
+*.tmp
+
+# Python caches
+__pycache__/
+*.pyc
+
+# Other
+.idea/
+.vscode/
+*.swp

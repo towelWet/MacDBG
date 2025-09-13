@@ -108,11 +108,13 @@ struct AIChatView: View {
             // Input Area
             VStack(spacing: 8) {
                 HStack {
-                    TextField("Ask AI about the code...", text: $messageText)
-                        .textFieldStyle(RoundedBorderTextFieldStyle())
-                        .onSubmit {
+                    SimpleChatTextField(
+                        text: $messageText,
+                        placeholder: "Ask AI about the code...",
+                        onSend: {
                             sendMessage()
                         }
+                    )
                     .focused($isTextFieldFocused)
                     
                     Button(action: sendMessage) {
@@ -327,6 +329,7 @@ struct ChatMessageView: View {
     }
 }
 
+// SimpleChatTextField is defined in AIChatView_Enhanced.swift
 
 struct AIChatView_Previews: PreviewProvider {
     static var previews: some View {

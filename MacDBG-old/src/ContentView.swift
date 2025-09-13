@@ -44,7 +44,7 @@ struct ContentView: View {
                 
                 // AI chat section with built-in resize
                 if showingAIAnalysis {
-                    AIChatView(aiManager: aiManager)
+                    AIChatView_Enhanced(aiManager: aiManager)
                         .frame(minWidth: 200, idealWidth: 300, maxWidth: 500)
                 }
             }
@@ -399,7 +399,7 @@ struct ResizableAIChatView: View {
                 )
             
             // AI Chat content
-            AIChatView(aiManager: aiManager)
+            AIChatView_Enhanced(aiManager: aiManager)
                 .frame(width: chatWidth)
         }
     }
