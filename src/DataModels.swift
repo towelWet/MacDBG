@@ -316,6 +316,116 @@ public struct StringReference: Identifiable, Equatable {
     }
 }
 
+// MARK: - Breakpoint System (x64dbg-style)
+
+/// Breakpoint types supported by the debugger
+// x64dbg-style breakpoint types (matching BPXTYPE)
+public enum BreakpointType: String, CaseIterable, Codable {
+    case software = "bp_normal"      // INT3 breakpoint (like x64dbg bp_normal)
+    case hardware = "bp_hardware"    // Hardware breakpoint (like x64dbg bp_hardware)  
+    case memory = "bp_memory"        // Memory breakpoint (like x64dbg bp_memory)
+    case dll = "bp_dll"              // DLL breakpoint
+    case exception = "bp_exception"  // Exception breakpoint
+    
+    public var displayName: String {
+        switch self {
+        case .software: return "Software (INT3)"
+        case .hardware: return "Hardware"
+        case .memory: return "Memory"
+        case .dll: return "DLL"
+        case .exception: return "Exception"
+        }
+    }
+    
+    // x64dbg command equivalents
+    public var x64dbgCommand: String {
+        switch self {
+        case .software: return "bp"   // bp command
+        case .hardware: return "bph"  // bph command
+        case .memory: return "bpm"    // bpm command
+        case .dll: return "bpdll"     // bpdll command
+        case .exception: return "bpe" // bpe command
+        }
+    }
+}
+
+/// Breakpoint state
+public enum BreakpointState: String, CaseIterable, Codable {
+    case enabled = "enabled"
+    case disabled = "disabled"
+    case inactive = "inactive"
+    
+    public var displayName: String {
+        switch self {
+        case .enabled: return "Enabled"
+        case .disabled: return "Disabled"
+        case .inactive: return "Inactive"
+        }
+    }
+}
+
+/// Represents a breakpoint in the debugger (x64dbg-style)
+public struct Breakpoint: Identifiable, Hashable, Codable {
+    public let id = UUID()
+    public let address: UInt64
+    public let type: BreakpointType
+    public var state: BreakpointState
+    public var enabled: Bool
+    public var active: Bool
+    public var hitCount: UInt64
+    public var name: String?
+    public var condition: String?
+    public var logText: String?
+    public var commandText: String?
+    public var module: String?
+    
+    // Hardware breakpoint specific
+    public var hwSize: String? // "byte", "word", "dword", "qword"
+    public var hwType: String? // "access", "write", "execute"
+    
+    // Memory breakpoint specific
+    public var memSize: UInt64?
+    public var memType: String? // "access", "read", "write", "execute"
+    
+    public init(address: UInt64, type: BreakpointType = .software, state: BreakpointState = .enabled) {
+        self.address = address
+        self.type = type
+        self.state = state
+        self.enabled = state == .enabled
+        self.active = true
+        self.hitCount = 0
+        self.name = nil
+        self.condition = nil
+        self.logText = nil
+        self.commandText = nil
+        self.module = nil
+        self.hwSize = nil
+        self.hwType = nil
+        self.memSize = nil
+        self.memType = nil
+    }
+    
+    public var formattedAddress: String {
+        String(format: "0x%llX", address)
+    }
+    
+    public var isEnabled: Bool {
+        return enabled && active
+    }
+    
+    public mutating func toggle() {
+        if active {
+            enabled.toggle()
+            state = enabled ? .enabled : .disabled
+        }
+    }
+    
+    public mutating func remove() {
+        active = false
+        state = .inactive
+    }
+}
+
 // MARK: - LLDB Response Models
 
 /// Response structure for string references from LLDB server

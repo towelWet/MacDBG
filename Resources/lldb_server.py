@@ -815,6 +815,83 @@ class Handler:
             log_error(f"Exception in detach: {str(e)}", e)
             return self.buildError(f"detach failed: {str(e)}")
 
+    def setBreakpoint(self, address, bp_type="software"):
+        try:
+            if self.target == None:
+                return self.buildError("no target")
+            
+            # Parse address
+            if isinstance(address, str):
+                if address.startswith("0x"):
+                    addr = int(address, 16)
+                else:
+                    addr = int(address)
+            else:
+                addr = address
+            
+            log_lldb(f"Setting {bp_type} breakpoint at 0x{addr:x}")
+            
+            # Create breakpoint based on type
+            if bp_type == "software":
+                # Software breakpoint (INT3)
+                bp = self.target.BreakpointCreateByAddress(addr)
+            elif bp_type == "hardware":
+                # Hardware breakpoint (limited to 4 on x86_64)
+                bp = self.target.BreakpointCreateByAddress(addr)
+                # Note: LLDB doesn't directly support hardware breakpoints via Python API
+                # This would need to be implemented using debug registers
+            else:
+                return self.buildError(f"unsupported breakpoint type: {bp_type}")
+            
+            if not bp.IsValid():
+                return self.buildError("failed to create breakpoint")
+            
+            # Get breakpoint ID
+            bp_id = bp.GetID()
+            
+            log_lldb(f"Breakpoint created with ID: {bp_id}")
+            
+            return {
+                "status": "ok",
+                "success": True,
+                "id": bp_id,
+                "address": addr
+            }
+            
+        except Exception as e:
+            log_error(f"Exception in setBreakpoint: {str(e)}", e)
+            return self.buildError(f"setBreakpoint failed: {str(e)}")
+
+    def removeBreakpoint(self, bp_id):
+        try:
+            if self.target == None:
+                return self.buildError("no target")
+            
+            if isinstance(bp_id, str):
+                bp_id = int(bp_id)
+            
+            log_lldb(f"Removing breakpoint with ID: {bp_id}")
+            
+            # Find and remove breakpoint
+            bp = self.target.FindBreakpointByID(bp_id)
+            if not bp.IsValid():
+                return self.buildError(f"breakpoint {bp_id} not found")
+            
+            # Remove breakpoint
+            self.target.BreakpointDelete(bp_id)
+            
+            log_lldb(f"Breakpoint {bp_id} removed successfully")
+            
+            return {
+                "status": "ok",
+                "success": True,
+                "id": bp_id
+            }
+            
+        except Exception as e:
+            log_error(f"Exception in removeBreakpoint: {str(e)}", e)
+            return self.buildError(f"removeBreakpoint failed: {str(e)}")
+
     def handleRequest(self, req):
         try:
             command = req.get("command")
@@ -880,6 +957,19 @@ class Handler:
                 log_python_server(f"Sending response: {result}")
                 return result
             
+            elif command == "setBreakpoint":
+                address = req.get("address")
+                bp_type = req.get("type", "software")
+                result = self.setBreakpoint(address, bp_type)
+                log_python_server(f"Sending response: {result}")
+                return result
+            
+            elif command == "removeBreakpoint":
+                bp_id = req.get("id")
+                result = self.removeBreakpoint(bp_id)
+                log_python_server(f"Sending response: {result}")
+                return result
+            
             else:
                 return self.buildError(f"Unknown command: {command}")
                 
@@ -913,11 +1003,12 @@ if __name__ == "__main__":
     logger = init_logger()
     log_python_server("Starting MacDBG Python server")
     
-    # Get file descriptors from command line
-    input_fd = int(sys.argv[1]) if len(sys.argv) > 1 else 0
-    output_fd = int(sys.argv[2]) if len(sys.argv) > 2 else 1
+    # Always use stdin/stdout for communication with Swift
+    # The Swift code provides these via pipes
+    input_fd = 0  # stdin
+    output_fd = 1  # stdout
     
-    log_python_server(f"Using input_fd={input_fd}, output_fd={output_fd}")
+    log_python_server(f"Using stdin/stdout for communication")
     
     # Create and run handler
     handler = Handler(input_fd, output_fd, False)

@@ -102,36 +102,40 @@ struct DisassemblyView: View {
             } else {
                 // Virtualized Disassembly List (x64dbg-style performance)
                 ScrollViewReader { proxy in
-                    ScrollView {
+                    ScrollView { () -> AnyView in
                         let hasSelectedLines = !selectedAddresses.isEmpty
                         let visibleLines = debugger.disassembly // Show ALL lines like x64dbg
                         
-                        LazyVStack(alignment: .leading, spacing: 0) {
-                            ForEach(visibleLines.filter { $0.address > 0 }, id: \.address) { line in
-                                OptimizedDisassemblyRowView(
-                                    line: line,
-                                    isActive: line.address == debugger.programCounter,
-                                    isSelected: selectedAddresses.contains(line.address),
-                                    hasSelectedLines: hasSelectedLines,
-                                    onTap: { toggleSelection(line.address) },
-                                    onTapWithModifiers: { isShift, isCommand in 
-                                        toggleSelectionWithModifier(line.address, isShiftPressed: isShift, isCommandPressed: isCommand)
-                                    },
-                                    onContextMenu: { showContextMenu(for: line) },
-                                    onSendSelected: { sendSelectedToAI() },
-                                    onCopySelection: { copySelection() },
-                                    onCopyLine: { copyLine(line) },
-                                    onFollowInDump: { followInDump(line) },
-                                    onFollowInMemoryMap: { followInMemoryMap(line) },
-                                    onAddLabel: { addLabel(to: line) },
-                                    onAddComment: { addComment(to: line) }
-                                )
-                                .id(line.address)
-                                .animation(.none, value: selectedAddresses) // Disable animations for performance
+                        return AnyView(
+                            LazyVStack(alignment: .leading, spacing: 0) {
+                                ForEach(visibleLines.filter { $0.address > 0 }, id: \.address) { line in
+                                    OptimizedDisassemblyRowView(
+                                        line: line,
+                                        isActive: line.address == debugger.programCounter,
+                                        isSelected: selectedAddresses.contains(line.address),
+                                        hasSelectedLines: hasSelectedLines,
+                                        hasBreakpoint: debugger.hasBreakpoint(at: line.address),
+                                        onTap: { toggleSelection(line.address) },
+                                        onTapWithModifiers: { isShift, isCommand in 
+                                            toggleSelectionWithModifier(line.address, isShiftPressed: isShift, isCommandPressed: isCommand)
+                                        },
+                                        onDoubleTap: { toggleBreakpoint(line.address) },
+                                        onContextMenu: { showContextMenu(for: line) },
+                                        onSendSelected: { sendSelectedToAI() },
+                                        onCopySelection: { copySelection() },
+                                        onCopyLine: { copyLine(line) },
+                                        onFollowInDump: { followInDump(line) },
+                                        onFollowInMemoryMap: { followInMemoryMap(line) },
+                                        onAddLabel: { addLabel(to: line) },
+                                        onAddComment: { addComment(to: line) }
+                                    )
+                                    .id(line.address)
+                                    .animation(.none, value: selectedAddresses) // Disable animations for performance
+                                }
                             }
-                        }
-                        .drawingGroup() // Rasterize for better performance with many items
-                        .padding(.vertical, 4)
+                            .drawingGroup() // Rasterize for better performance with many items
+                            .padding([.top, .bottom], 4)
+                        )
                     }
                     .onAppear {
                         // Scroll to program counter like x64dbg
@@ -211,37 +215,36 @@ struct DisassemblyView: View {
     }
     
     private func toggleSelection(_ address: UInt64) {
+        print("🔍 Selecting address: 0x\(String(format: "%llx", address))")
+        
         // x64dbg-style selection: single click = select only that line
-        Task { @MainActor in
-            selectedAddresses.removeAll()
-            selectedAddresses.insert(address)
-            lastSelectedAddress = address
-        }
+        selectedAddresses.removeAll()
+        selectedAddresses.insert(address)
+        lastSelectedAddress = address
+        print("🔍 Selection updated - count: \(selectedAddresses.count)")
     }
     
     private func toggleSelectionWithModifier(_ address: UInt64, isShiftPressed: Bool, isCommandPressed: Bool) {
-        Task { @MainActor in
-            if isCommandPressed {
-                // Cmd+click: toggle individual line (like x64dbg Ctrl+click)
-                if selectedAddresses.contains(address) {
-                    selectedAddresses.remove(address)
-                    if lastSelectedAddress == address {
-                        lastSelectedAddress = selectedAddresses.first
-                    }
-                } else {
-                    selectedAddresses.insert(address)
-                    lastSelectedAddress = address
+        if isCommandPressed {
+            // Cmd+click: toggle individual line (like x64dbg Ctrl+click)
+            if selectedAddresses.contains(address) {
+                selectedAddresses.remove(address)
+                if lastSelectedAddress == address {
+                    lastSelectedAddress = selectedAddresses.first
                 }
-            } else if isShiftPressed, let lastAddress = lastSelectedAddress {
-                // Shift+click: select range from last selected to current
-                selectRange(from: lastAddress, to: address)
-                lastSelectedAddress = address
             } else {
-                // Regular click: select only this line
-                selectedAddresses.removeAll()
                 selectedAddresses.insert(address)
                 lastSelectedAddress = address
             }
+        } else if isShiftPressed, let lastAddress = lastSelectedAddress {
+            // Shift+click: select range from last selected to current
+            selectRange(from: lastAddress, to: address)
+            lastSelectedAddress = address
+        } else {
+            // Regular click: select only this line
+            selectedAddresses.removeAll()
+            selectedAddresses.insert(address)
+            lastSelectedAddress = address
         }
     }
     
@@ -462,6 +465,40 @@ struct DisassemblyView: View {
         }
     }
     
+    private func toggleBreakpoint(_ address: UInt64) {
+        print("🔴 DisassemblyView.toggleBreakpoint called for address: 0x\(String(format: "%llx", address))")
+        print("🔴 Current debugger state: isAttached=\(debugger.isAttached)")
+        
+        // TEMPORARY: Use only the test breakpoint system for now
+        // This bypasses the LLDB server completely for testing the visual system
+        print("🔴 Before toggle - hasBreakpoint: \(debugger.hasBreakpoint(at: address))")
+        print("🔴 Before toggle - breakpoints count: \(debugger.breakpoints.count)")
+        
+        if !debugger.hasBreakpoint(at: address) {
+            let testBreakpoint = Breakpoint(address: address, type: .software)
+            // Use proper state update for SwiftUI
+            DispatchQueue.main.async {
+                self.debugger.breakpoints.append(testBreakpoint)
+                print("🔴 TEST: Added visual breakpoint at 0x\(String(format: "%llx", address)) - Total breakpoints: \(self.debugger.breakpoints.count)")
+                print("🔴 After add - hasBreakpoint: \(self.debugger.hasBreakpoint(at: address))")
+            }
+        } else {
+            // Use proper state update for SwiftUI
+            DispatchQueue.main.async {
+                self.debugger.breakpoints.removeAll { $0.address == address }
+                print("🔴 TEST: Removed visual breakpoint at 0x\(String(format: "%llx", address)) - Total breakpoints: \(self.debugger.breakpoints.count)")
+                print("🔴 After remove - hasBreakpoint: \(self.debugger.hasBreakpoint(at: address))")
+            }
+        }
+        
+        // Skip the real LLDB command for now since server isn't working
+        // Task {
+        //     print("🔴 Calling debugger.toggleBreakpoint...")
+        //     await debugger.toggleBreakpoint(at: address)
+        //     print("🔴 debugger.toggleBreakpoint completed")
+        // }
+    }
+    
     private func parseAddress(_ addressString: String) -> UInt64? {
         let trimmed = addressString.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.hasPrefix("0x") || trimmed.hasPrefix("0X") {
@@ -488,8 +525,10 @@ struct DisassemblyRowView: View {
             isActive: isActive,
             isSelected: isSelected,
             hasSelectedLines: hasSelectedLines,
+            hasBreakpoint: false, // Default: no breakpoint
             onTap: onTap,
             onTapWithModifiers: { _, _ in }, // Default: no modifier handling
+            onDoubleTap: { }, // Default: no double-tap action
             onContextMenu: onContextMenu,
             onSendSelected: onSendSelected,
             onCopySelection: { }, // Default: no action
@@ -508,8 +547,10 @@ struct OptimizedDisassemblyRowView: View {
     let isActive: Bool
     let isSelected: Bool
     let hasSelectedLines: Bool
+    let hasBreakpoint: Bool
     let onTap: () -> Void
     let onTapWithModifiers: (Bool, Bool) -> Void
+    let onDoubleTap: () -> Void
     let onContextMenu: () -> Void
     let onSendSelected: () -> Void
     let onCopySelection: () -> Void
@@ -523,28 +564,37 @@ struct OptimizedDisassemblyRowView: View {
     private static let monospacedFont = Font.system(.caption, design: .monospaced)
     private static let rowHeight: CGFloat = 20
     
+    // State for double-tap detection
+    @State private var tapCount = 0
+    @State private var lastTapTime = Date()
+    
     var body: some View {
         HStack(alignment: .center, spacing: 8) {
-            // Address (fixed width for alignment)
+            // x64dbg-style: no separate indicator, breakpoints shown via address coloring
+            Spacer()
+                .frame(width: 12)
+            
+            // Address column (case 0 in x64dbg) - x64dbg-style breakpoint coloring
             Text(line.formattedAddress)
                 .font(Self.monospacedFont)
-                .foregroundColor(.secondary)
+                .foregroundColor(hasBreakpoint ? .white : .secondary)
+                .background(hasBreakpoint ? Color.red : Color.clear)
                 .frame(width: 140, alignment: .leading)
             
-            // Bytes (limited width)
+            // Bytes/Opcodes column (case 1 in x64dbg - THIS IS WHERE BREAKPOINTS ARE SET!)
             Text(line.bytes.prefix(24))
                 .font(Self.monospacedFont)
                 .foregroundColor(.secondary)
                 .frame(width: 120, alignment: .leading)
                 .lineLimit(1)
             
-            // Instruction (color-coded)
+            // Instruction column (case 2 in x64dbg)
             Text(line.instruction)
                 .font(Self.monospacedFont)
                 .foregroundColor(instructionColor)
                 .frame(width: 65, alignment: .leading)
             
-            // Operands (flexible width)
+            // Operands column (flexible width)
             Text(line.operands)
                 .font(Self.monospacedFont)
                 .foregroundColor(.primary)
@@ -554,21 +604,53 @@ struct OptimizedDisassemblyRowView: View {
         .frame(height: Self.rowHeight)
         .padding(.horizontal, 8)
         .background(backgroundColor)
-        .contentShape(Rectangle()) // Optimize hit testing
+        .contentShape(Rectangle()) // Make entire row tappable
         .onTapGesture {
-            // Check for modifier keys using NSEvent
-            let isShiftPressed = NSEvent.modifierFlags.contains(.shift)
-            let isCommandPressed = NSEvent.modifierFlags.contains(.command)
-            
-            if isShiftPressed || isCommandPressed {
-                onTapWithModifiers(isShiftPressed, isCommandPressed)
-            } else {
-                onTap()
-            }
+            print("🔍 Row tapped - address: \(line.formattedAddress)")
+            handleSingleTap()
+        }
+        .onTapGesture(count: 2) {
+            print("🔍 Row double-tapped - address: \(line.formattedAddress)")
+            onDoubleTap()
         }
         .contextMenu {
             contextMenuContent
         }
+    }
+    
+    private func handleSingleTap() {
+        print("🔍 Single tap on \(line.formattedAddress)")
+        
+        // Check for modifier keys using NSEvent
+        let isShiftPressed = NSEvent.modifierFlags.contains(.shift)
+        let isCommandPressed = NSEvent.modifierFlags.contains(.command)
+        
+        if isShiftPressed || isCommandPressed {
+            onTapWithModifiers(isShiftPressed, isCommandPressed)
+        } else {
+            onTap()
+        }
+    }
+    
+    private func handleOpcodesColumnTap() {
+        let now = Date()
+        let timeSinceLastTap = now.timeIntervalSince(lastTapTime)
+        
+        print("🔴 Opcodes column tapped! Time since last tap: \(timeSinceLastTap)")
+        
+        if timeSinceLastTap < 0.5 { // 500ms double-tap window
+            // This is a double-tap
+            print("🔴 Double-tap detected on opcodes column - setting breakpoint at \(line.formattedAddress)")
+            onDoubleTap()
+            tapCount = 0
+        } else {
+            // This is a single tap
+            print("🔴 Single tap on opcodes column")
+            handleSingleTap()
+            tapCount = 1
+        }
+        
+        lastTapTime = now
     }
     
     // Pre-computed background color
@@ -605,6 +687,21 @@ struct OptimizedDisassemblyRowView: View {
     
     @ViewBuilder
     private var contextMenuContent: some View {
+        // Breakpoint Options (like x64dbg)
+        if hasBreakpoint {
+            Button("🔴 Remove Breakpoint") {
+                print("🔴 Context menu: Remove Breakpoint clicked!")
+                onDoubleTap() // Toggle to remove
+            }
+        } else {
+            Button("🔴 Set Breakpoint") {
+                print("🔴 Context menu: Set Breakpoint clicked!")
+                onDoubleTap() // Toggle to add
+            }
+        }
+        
+        Divider()
+        
         // AI Features Section
         if hasSelectedLines {
             Button("🤖 Send Selected to AI") {

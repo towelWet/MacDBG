@@ -85,9 +85,8 @@ class LLDBManager {
         task.executableURL = URL(fileURLWithPath: pythonPath)
         macdbgLog("🐍 Using Python at: \(pythonPath)", category: .lldb)
 
-        // Pass '0' and '1' so lldb_server.py runs in binary mode (length-prefixed),
-        // matching our Swift read/write protocol.
-        task.arguments = [validScriptPath, "0", "1"]
+        // Run lldb_server.py with no arguments - it will use stdin/stdout
+        task.arguments = [validScriptPath]
         macdbgLog("📝 Task arguments: \(task.arguments!)", category: .lldb)
 
         // Ensure LLDB's Python modules are on PYTHONPATH. Keep it simple to avoid compile issues.
@@ -523,6 +522,31 @@ class LLDBManager {
         sendCommand(command: "selectThreadID", args: ["tid": tid])
     }
     
+    // MARK: - Breakpoint Commands
+    
+    func setBreakpoint(at address: UInt64, type: String = "software") {
+        macdbgLog("🔴 LLDBManager.setBreakpoint called for address: 0x\(String(format: "%llx", address))", category: .lldb)
+        sendCommand(command: "setBreakpoint", args: [
+            "address": String(format: "0x%llx", address),
+            "type": type
+        ])
+    }
+    
+    func removeBreakpoint(at address: UInt64) {
+        macdbgLog("🔴 LLDBManager.removeBreakpoint called for address: 0x\(String(format: "%llx", address))", category: .lldb)
+        sendCommand(command: "removeBreakpoint", args: [
+            "address": String(format: "0x%llx", address)
+        ])
+    }
+    
+    func toggleBreakpoint(at address: UInt64, type: String = "software") {
+        macdbgLog("🔴 LLDBManager.toggleBreakpoint called for address: 0x\(String(format: "%llx", address))", category: .lldb)
+        sendCommand(command: "toggleBreakpoint", args: [
+            "address": String(format: "0x%llx", address),
+            "type": type
+        ])
+    }
+    
     private func readServerStderr() {
         guard let fileHandle = stderrPipe?.fileHandleForReading else { return }
         let newline = "\n".data(using: .utf8)!
@@ -536,7 +560,12 @@ class LLDBManager {
                     let lineData = buffer.subdata(in: 0..<r.lowerBound)
                     buffer.removeSubrange(0..<r.upperBound)
                     if let s = String(data: lineData, encoding: .utf8), !s.isEmpty {
-                        onLog?("[Python-ERR] \(s)")
+                        // Check if it's actually an error or just normal logging
+                        if s.contains("ERROR") || s.contains("Exception") || s.contains("Traceback") {
+                            onLog?("[Python-ERR] \(s)")
+                        } else {
+                            onLog?("[Python-INFO] \(s)")
+                        }
                     }
                 }
             } catch {

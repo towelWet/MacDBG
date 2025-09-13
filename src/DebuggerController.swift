@@ -21,7 +21,7 @@ public class DebuggerController: ObservableObject, LLDBManagerDelegate {
     @Published public var registers: [String: UInt64] = [:]
     @Published public var disassembly: [DisassemblyLine] = []
     @Published public var memory: [UInt64: [UInt8]] = [:]
-    @Published public var breakpoints: Set<UInt64> = []
+    @Published public var breakpoints: [Breakpoint] = []
     @Published public var logs: [String] = []
     @Published public var disassemblyUpdateTrigger: Int = 0
     @Published public var navigationTarget: UInt64? = nil
@@ -499,30 +499,72 @@ quit
     }
     
     
-    // MARK: - Breakpoints
-    public func setBreakpoint(at address: UInt64) async {
-        guard isAttached else { return }
+    // MARK: - Breakpoints (x64dbg-style)
+    public func setBreakpoint(at address: UInt64, type: BreakpointType = .software) async {
+        print("🔴 DebuggerController.setBreakpoint called")
+        print("🔴 isAttached: \(isAttached)")
+        
+        guard isAttached else { 
+            print("🔴 Not attached, returning early")
+            addLog("❌ Cannot set breakpoint: not attached to process")
+            return 
+        }
+        
+        // Check if breakpoint already exists
+        if let existingIndex = breakpoints.firstIndex(where: { $0.address == address }) {
+            // Toggle existing breakpoint
+            print("🔴 Existing breakpoint found, toggling...")
+            breakpoints[existingIndex].toggle()
+            addLog("🔄 Toggled breakpoint at \(breakpoints[existingIndex].formattedAddress)")
+            return
+        }
+        
+        // Create new breakpoint
+        let newBreakpoint = Breakpoint(address: address, type: type)
         pendingBreakpointAddress = address
-        addLog("🔴 Setting breakpoint at 0x\(String(format: "%llx", address))")
-        lldbManager.sendCommand(command: "setBreakpoint", args: ["address": String(format: "0x%llx", address)])
+        print("🔴 Creating new breakpoint at \(newBreakpoint.formattedAddress)")
+        addLog("🔴 Setting \(type.displayName.lowercased()) breakpoint at \(newBreakpoint.formattedAddress)")
+        
+        // Send command to LLDB
+        print("🔴 Sending setBreakpoint command to LLDB...")
+        lldbManager.setBreakpoint(at: address, type: type.rawValue)
+        print("🔴 setBreakpoint command sent")
     }
     
     public func removeBreakpoint(at address: UInt64) async {
-        guard isAttached, let breakpointID = breakpointIDs[address] else { return }
-        addLog("⚪ Removing breakpoint at 0x\(String(format: "%llx", address))")
-        lldbManager.sendCommand(command: "removeBreakpoint", args: ["id": breakpointID])
+        guard isAttached else { return }
+        
+        if let index = breakpoints.firstIndex(where: { $0.address == address }) {
+            let breakpoint = breakpoints[index]
+            breakpoints.remove(at: index)
+            
+            lldbManager.removeBreakpoint(at: address)
+            breakpointIDs.removeValue(forKey: address)
+            
+            addLog("⚪ Removed breakpoint at \(breakpoint.formattedAddress)")
+        }
     }
     
-    public func toggleBreakpoint(at address: UInt64) async {
-        if breakpoints.contains(address) {
+    public func toggleBreakpoint(at address: UInt64, type: BreakpointType = .software) async {
+        print("🔴 DebuggerController.toggleBreakpoint called for address: 0x\(String(format: "%llx", address))")
+        print("🔴 isAttached: \(isAttached)")
+        print("🔴 Current breakpoints count: \(breakpoints.count)")
+        
+        if hasBreakpoint(at: address) {
+            print("🔴 Breakpoint exists, removing...")
             await removeBreakpoint(at: address)
         } else {
-            await setBreakpoint(at: address)
+            print("🔴 No breakpoint exists, setting new one...")
+            await setBreakpoint(at: address, type: type)
         }
     }
     
     public func hasBreakpoint(at address: UInt64) -> Bool {
-        return breakpoints.contains(address)
+        return breakpoints.contains { $0.address == address && $0.active }
+    }
+    
+    public func getBreakpoint(at address: UInt64) -> Breakpoint? {
+        return breakpoints.first { $0.address == address }
     }
     
     public func clearAllBreakpoints() {
@@ -530,6 +572,26 @@ quit
         breakpointIDs.removeAll()
         pendingBreakpointAddress = nil
         addLog("🗑️ Cleared all breakpoints")
+    }
+    
+    public func enableAllBreakpoints() {
+        for i in breakpoints.indices {
+            if breakpoints[i].active {
+                breakpoints[i].enabled = true
+                breakpoints[i].state = .enabled
+            }
+        }
+        addLog("✅ Enabled all breakpoints")
+    }
+    
+    public func disableAllBreakpoints() {
+        for i in breakpoints.indices {
+            if breakpoints[i].active {
+                breakpoints[i].enabled = false
+                breakpoints[i].state = .disabled
+            }
+        }
+        addLog("⏸️ Disabled all breakpoints")
     }
     
     // MARK: - Refresh Functions
@@ -833,9 +895,12 @@ extension DebuggerController {
             if let success = response["success"] as? Bool, success,
                let address = self.pendingBreakpointAddress,
                let id = response["id"] as? Int {
-                self.breakpoints.insert(address)
+                
+                // Create new breakpoint and add to list
+                let newBreakpoint = Breakpoint(address: address)
+                self.breakpoints.append(newBreakpoint)
                 self.breakpointIDs[address] = id
-                self.addLog("✅ Breakpoint set at 0x\(String(format: "%llx", address))")
+                self.addLog("✅ Breakpoint set at \(newBreakpoint.formattedAddress)")
             } else {
                 self.addLog("❌ Failed to set breakpoint")
             }
