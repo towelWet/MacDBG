@@ -63,6 +63,8 @@ swift run macdbg-cli
 6. **Monitor registers** and memory in side panels
 
 ## Project Structure
+
+```
 MacDBG/
 ├── src/                           # Core Swift application source
 │   ├── MacDBGApp.swift                   # SwiftUI app entry point
@@ -101,6 +103,7 @@ MacDBG/
 ├── build.sh                      # Builds a standalone MacDBG.app bundle
 ├── listfiles.sh                  # Helper script for listing files
 └── README.md                     # This file
+```
 
 
 **Instruction Assembler (subset mapping example):**
