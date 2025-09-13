@@ -73,9 +73,6 @@ MacDBG/
 │   ├── DebugControlsView.swift           # Debug action buttons
 │   ├── DebugEngine.swift                 # Scripted/legacy LLDB driving utilities
 │   ├── DebuggerController.swift          # Main debugging controller and state
-│   ├── DebuggerControllerFixed.swift     # Alternative stabilized controller
-│   ├── DebuggerController_old.swift      # Legacy controller reference
-│   ├── DebuggerController_broken.swift   # Experimental/broken variant (kept for reference)
 │   ├── DebuggerViews.swift               # Aggregated/legacy view helpers
 │   ├── DisassemblyView.swift             # Assembly viewer
 │   ├── InstructionAssembler.swift        # x64 instruction assembler
@@ -87,7 +84,13 @@ MacDBG/
 │   ├── MemoryView.swift                  # Hex/ASCII memory viewer
 │   ├── ProcessListView.swift             # Process selection interface
 │   ├── RegistersView.swift               # CPU register display
-│   └── TestTarget.c                      # Small test target (example)
+│   ├── TestTarget.c                      # Small test target (example)
+│   ├── AIAssistantView.swift             # AI assistant interface
+│   ├── AIChatView.swift                  # AI chat functionality
+│   ├── AIModelManager.swift              # AI model management
+│   ├── DebugLogger.swift                 # Debug logging utilities
+│   ├── StringsView.swift                 # String analysis view
+│   └── XRefsView.swift                   # Cross-reference analysis
 ├── cli/                          # Command-line interface target (SwiftPM)
 │   └── main.swift               # CLI implementation and commands
 ├── cpp/                          # High-performance disassembly engine
@@ -95,14 +98,64 @@ MacDBG/
 │   ├── DisassemblyEngine.hpp    # C++ engine public API
 │   ├── MacDBGBridge.hpp         # C/ObjC bridge header for Swift interop
 │   ├── MacDBGBridge.mm          # Objective-C++ bridge implementation
-│   └── README.md                # C++ engine notes
+│   ├── AIModelBridge.hpp        # AI model bridge header
+│   ├── AIModelBridge.mm         # AI model bridge implementation
+│   ├── AIModelManager.cpp       # AI model manager implementation
+│   └── AIModelManager.hpp       # AI model manager header
+├── ai-backend/                   # AI backend integration
+│   ├── include/ai-backend/       # AI backend headers
+│   │   ├── llmodel.h            # LLM model interface
+│   │   └── llmodel_c.h          # C interface for LLM
+│   └── src/                      # AI backend source
+│       └── llmodel_c.cpp        # C implementation for LLM
 ├── Resources/                    # Supporting resources
-│   └── lldb_server.py           # Python LLDB bridge/server
-├── Patterns/                     # Development utilities & patterns (git flows, specs, scripts)
+│   ├── lldb_server.py           # Python LLDB bridge/server
+│   └── lldb_server_original.py  # Original LLDB server (backup)
+├── models/                       # AI model files
+│   ├── README.md                # Model documentation
+│   └── qwen2.5-coder-3b-instruct-q4_0.gguf  # AI model file
+├── Patterns/                     # Development utilities & patterns
+│   ├── git/                      # Git workflow patterns
+│   │   ├── GitDeletion.txt      # Git deletion patterns
+│   │   ├── GitHubLargeFilesSolution.txt  # Large file handling
+│   │   ├── GitMove.txt          # Git move patterns
+│   │   └── GitUpdate.txt        # Git update patterns
+│   ├── listfiles/                # File listing utilities
+│   │   ├── 1/                   # Version 1 patterns
+│   │   │   ├── listfiles.bat    # Windows batch script
+│   │   │   └── listfiles.sh     # Unix shell script
+│   │   ├── 2/                   # Version 2 patterns
+│   │   │   └── listfiles.bat    # Windows batch script
+│   │   └── 3/                   # Version 3 patterns
+│   │       └── listfiles.sh     # Unix shell script
+│   ├── run-stop/                 # Run/stop utilities
+│   │   ├── run/                 # Run scripts
+│   │   │   ├── run.bat          # Windows run script
+│   │   │   └── run.sh           # Unix run script
+│   │   └── stop/                # Stop scripts
+│   │       ├── stop.bat         # Windows stop script
+│   │       └── stop.sh          # Unix stop script
+│   ├── Icon                     # Icon resources
+│   ├── Towel Design.txt         # Design documentation
+│   ├── temp_.bat                # Temporary batch script
+│   └── temp_.sh                 # Temporary shell script
+├── test_program.dSYM/            # Debug symbols for test program
+│   └── Contents/                 # Debug symbol contents
+│       ├── Info.plist           # Debug symbol info
+│       └── Resources/            # Debug symbol resources
+│           └── DWARF/            # DWARF debug information
+│               └── test_program  # Test program debug info
+├── MacDBG-Bridging-Header.h     # Objective-C bridging header
+├── MacDBG.entitlements          # macOS app entitlements
 ├── Package.swift                 # Swift Package Manager configuration
 ├── build.sh                      # Builds a standalone MacDBG.app bundle
-├── listfiles.sh                  # Helper script for listing files
-└── README.md                     # This file
+├── debug_logger.py              # Python debug logging utility
+├── download_model.sh            # AI model download script
+├── libAIBridge.dylib            # AI bridge dynamic library
+├── listfiles.sh                 # Helper script for listing files
+├── plan.txt                     # Project planning document
+├── properlayout.txt             # Layout documentation
+└── README.md                    # This file
 ```
 
 
