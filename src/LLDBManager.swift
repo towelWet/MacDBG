@@ -116,6 +116,19 @@ class LLDBManager {
         DispatchQueue.global(qos: .utility).async {
             self.readServerStderr()
         }
+        
+        // Give the Python process time to fully initialize
+        macdbgLog("⏳ Waiting for Python process to initialize...", category: .lldb)
+        Thread.sleep(forTimeInterval: 2.0)
+        
+        // Verify the process is still running after initialization
+        if let process = self.process, process.isRunning {
+            macdbgLog("✅ Python process confirmed running after initialization (PID: \(process.processIdentifier))", category: .lldb)
+        } else {
+            macdbgLog("❌ Python process died during initialization!", category: .error)
+            let error = NSError(domain: "LLDBManager", code: 4, userInfo: [NSLocalizedDescriptionKey: "Python process died during startup"])
+            macdbgLogCrash(error, context: "Python process failed to initialize properly")
+        }
     }
 
     private func readExact(from handle: FileHandle, count: Int) throws -> Data? {
@@ -357,10 +370,30 @@ class LLDBManager {
         // Check if the Python process is still running
         if let process = process {
             if !process.isRunning {
+                let terminationStatus = process.terminationStatus
+                let terminationReason = process.terminationReason
                 macdbgLog("❌ Python process is not running! Process terminated.", category: .error)
-                let error = NSError(domain: "LLDBManager", code: 3, userInfo: [NSLocalizedDescriptionKey: "Python process terminated"])
-                macdbgLogCrash(error, context: "Python process died before sending command")
-                return
+                macdbgLog("   Termination Status: \(terminationStatus)", category: .error)
+                macdbgLog("   Termination Reason: \(terminationReason.rawValue)", category: .error)
+                
+                // Try to restart the Python process
+                macdbgLog("🔄 Attempting to restart Python process...", category: .lldb)
+                
+                // Reset process reference to allow restart
+                self.process = nil
+                self.stdinPipe = nil
+                self.stdoutPipe = nil
+                self.stderrPipe = nil
+                
+                do {
+                    try start()
+                    macdbgLog("✅ Python process restarted successfully", category: .lldb)
+                } catch {
+                    macdbgLog("❌ Failed to restart Python process: \(error)", category: .error)
+                    let restartError = NSError(domain: "LLDBManager", code: 3, userInfo: [NSLocalizedDescriptionKey: "Python process terminated and restart failed"])
+                    macdbgLogCrash(restartError, context: "Python process died before sending command and could not be restarted")
+                    return
+                }
             } else {
                 macdbgLog("✅ Python process is running (PID: \(process.processIdentifier))", category: .lldb)
             }

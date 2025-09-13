@@ -114,6 +114,16 @@ else
     exit 1
 fi
 
+# Copy debug_logger.py (required for Python server)
+echo "🐍 Copying debug_logger.py to Resources..."
+if [ -f "debug_logger.py" ]; then
+    cp "debug_logger.py" "$APP_NAME/Contents/Resources/"
+    echo "   ✅ Debug logger script copied successfully"
+else
+    echo "   ❌ ERROR: debug_logger.py not found - Python server will crash!"
+    exit 1
+fi
+
 # Create the Info.plist
 echo "📝 Creating Info.plist..."
 cat > "$APP_NAME/Contents/Info.plist" <<EOF

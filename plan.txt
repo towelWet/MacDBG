@@ -1,0 +1,211 @@
+MacDBG Debugging Plan - Fix Attach and Stepping Issues
+========================================================
+
+DO NOT CREATE NEW FILES UNLESS INSTRUCTED SPECIFICALLY TO DO SO.
+
+CURRENT STATUS:
+- AI Chat: ✅ Working perfectly with enhanced features
+- Build System: ✅ Compiles successfully 
+- Attach Functionality: ❌ NOT WORKING - Python process dies on startup
+- Stepping Functionality: ❌ NOT WORKING - Cannot step through code
+- Disassembly View: ❌ Shows "Still nothing in the red area"
+
+CORE PROBLEM ANALYSIS:
+======================
+
+1. PYTHON PROCESS DEATH ISSUE:
+   - Swift logs show: "❌ Python process is not running! Process terminated."
+   - Python script starts but dies before receiving commands
+   - Root cause: Likely LLDB module import failure or communication protocol mismatch
+
+2. COMMUNICATION PROTOCOL ISSUES:
+   - Swift sends commands via pipes to Python
+   - Python expects specific JSON format and binary protocol
+   - Potential mismatch in file descriptor handling or data encoding
+
+3. LLDB INTEGRATION PROBLEMS:
+   - Python script may not have access to LLDB module
+   - PYTHONPATH configuration might be incorrect
+   - LLDB Python bindings may not be properly loaded
+
+KEY FILES TO INVESTIGATE:
+========================
+
+SWIFT FRONTEND:
+- src/LLDBManager.swift (lines 1-432)
+  * start() method - Python process creation
+  * sendCommand() method - Command transmission
+  * Pipe creation and management
+  * PYTHONPATH environment variable setup
+
+- src/DebuggerController.swift (lines 900-1100)
+  * attachToProcess() method
+  * getExecutablePath() method
+  * Command orchestration
+
+- src/MacDBGApp.swift (lines 1-50)
+  * App initialization
+  * Crash handlers and logging setup
+
+PYTHON BACKEND:
+- Resources/lldb_server.py (lines 1-320)
+  * Handler class initialization
+  * transportRead() and transportWrite() methods
+  * attachToProcess() method (lines 150-250)
+  * LLDB module import and initialization
+  * JSON command parsing
+
+BUILD SYSTEM:
+- build.sh (lines 80-110)
+  * PYTHONPATH configuration
+  * Python executable selection
+  * LLDB framework path setup
+
+LOGGING SYSTEM:
+- src/DebugLogger.swift
+  * Swift-side logging for crash detection
+- Python logging in lldb_server.py
+  * Python-side debug output
+
+CRITICAL CODE COMPONENTS TO FIX:
+===============================
+
+1. PYTHON PROCESS STARTUP (LLDBManager.swift):
+   ```swift
+   // Lines 86-107 in start() method
+   task.environment = [
+       "PYTHONPATH": lldbPy,
+       "PATH": "/usr/bin:/bin"
+   ]
+   task.arguments = [scriptPath, "0", "1"]
+   ```
+
+2. LLDB MODULE IMPORT (lldb_server.py):
+   ```python
+   # Lines 1-10
+   import lldb
+   import sys
+   import os
+   import json
+   ```
+
+3. COMMUNICATION PROTOCOL (lldb_server.py):
+   ```python
+   # Lines 69-93 in transportRead()
+   length_data = os.read(self.input_fd, 4)
+   length = struct.unpack('<I', length_data)[0]
+   data = os.read(self.input_fd, length)
+   ```
+
+4. ATTACH PROCESS LOGIC (lldb_server.py):
+   ```python
+   # Lines 150-250 in attachToProcess()
+   self.target = self.debugger.CreateTargetWithFileAndArch(...)
+   process = self.target.AttachToProcessWithID(...)
+   ```
+
+DEBUGGING STRATEGY:
+==================
+
+PHASE 1: DIAGNOSE PYTHON STARTUP FAILURE
+- Test Python script directly with proper PYTHONPATH
+- Verify LLDB module can be imported
+- Check if script receives and processes basic commands
+- Add extensive logging to Python startup sequence
+
+PHASE 2: FIX COMMUNICATION PROTOCOL
+- Verify binary vs text mode for pipes
+- Test JSON serialization/deserialization
+- Ensure proper file descriptor handling
+- Add communication debugging logs
+
+PHASE 3: FIX LLDB INTEGRATION
+- Verify LLDB Python bindings are accessible
+- Test basic LLDB operations (create target, attach)
+- Fix any API usage issues
+- Ensure proper error handling
+
+PHASE 4: FIX STEPPING FUNCTIONALITY
+- Once attach works, test basic stepping commands
+- Verify register reading and PC advancement
+- Test disassembly generation and display
+- Handle system library stepping edge cases
+
+TESTING APPROACH:
+================
+
+1. ISOLATED PYTHON TESTING:
+   ```bash
+   cd /path/to/MacDBG
+   PYTHONPATH="/Applications/Xcode.app/Contents/SharedFrameworks/LLDB.framework/Resources/Python" \
+   /Applications/Xcode.app/Contents/Developer/usr/bin/python3 Resources/lldb_server.py 0 1
+   ```
+
+2. COMMUNICATION TESTING:
+   - Create simple test script to send commands to Python process
+   - Verify JSON parsing and response generation
+   - Test pipe communication independently
+
+3. LLDB API TESTING:
+   - Test LLDB operations in isolation
+   - Verify target creation and process attachment
+   - Test stepping and register reading
+
+4. INTEGRATION TESTING:
+   - Test full Swift -> Python -> LLDB chain
+   - Verify attach to simple test process
+   - Test stepping through basic instructions
+
+EXPECTED FIXES NEEDED:
+=====================
+
+1. PYTHONPATH Configuration:
+   - Ensure correct LLDB framework path
+   - Verify Python can import lldb module
+
+2. Pipe Communication:
+   - Fix binary/text mode mismatch
+   - Ensure proper JSON encoding/decoding
+   - Handle pipe closure and errors gracefully
+
+3. LLDB API Usage:
+   - Fix any deprecated or incorrect API calls
+   - Ensure proper error handling
+   - Handle process states correctly
+
+4. Process Lifecycle:
+   - Prevent Python process from dying unexpectedly
+   - Handle attach/detach operations properly
+   - Manage process states and transitions
+
+SUCCESS CRITERIA:
+================
+
+1. ✅ Python process starts and stays alive
+2. ✅ Swift can send commands to Python successfully  
+3. ✅ Python can import and use LLDB module
+4. ✅ Attach to process works without crashing
+5. ✅ Disassembly view shows actual assembly code
+6. ✅ Stepping advances PC and updates display
+7. ✅ Register values are read and displayed correctly
+8. ✅ Can step through both user code and system libraries
+
+RISK AREAS:
+===========
+
+- macOS security restrictions (SIP, code signing)
+- LLDB Python binding compatibility
+- Process permission and entitlement issues
+- Memory management in Swift/Python bridge
+- Threading and async operation handling
+
+NEXT STEPS:
+===========
+
+1. Start with Phase 1: Diagnose why Python process dies
+2. Test LLDB module import independently  
+3. Fix communication protocol issues
+4. Gradually build up to full attach/step functionality
+5. Test with simple processes before complex ones
+
+DO NOT PROCEED WITHOUT CONFIRMATION FROM USER.

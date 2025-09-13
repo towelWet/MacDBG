@@ -176,15 +176,26 @@ class Handler:
                 return self.buildError("no valid frame")
             
             registers = {}
-            for i in range(frame.GetNumRegisters()):
-                reg = frame.GetRegisterAtIndex(i)
-                if reg.IsValid():
-                    registers[reg.GetName()] = {
-                        'value': reg.GetValue(),
-                        'type': reg.GetType().GetName()
-                    }
             
-            return {"registers": registers}
+            # Get register context from frame
+            reg_context = frame.GetRegisters()
+            
+            # Iterate through register sets (general purpose, floating point, etc.)
+            for reg_set_idx in range(reg_context.GetSize()):
+                reg_set = reg_context.GetValueAtIndex(reg_set_idx)
+                if reg_set.IsValid():
+                    # Iterate through registers in this set
+                    for reg_idx in range(reg_set.GetNumChildren()):
+                        reg = reg_set.GetChildAtIndex(reg_idx)
+                        if reg.IsValid():
+                            reg_name = reg.GetName()
+                            reg_value = reg.GetValue()
+                            if reg_name and reg_value:
+                                registers[reg_name] = reg_value
+            
+            log_lldb(f"Retrieved {len(registers)} registers")
+            # Send as proper message format expected by Swift
+            return {"type": "registers", "payload": {"registers": registers}}
         except Exception as e:
             log_error(f"Exception in getRegisters: {str(e)}", e)
             return self.buildError(f"getRegisters failed: {str(e)}")
@@ -194,28 +205,115 @@ class Handler:
             if self.target == None:
                 return self.buildError("no target")
             
-            # Get instructions at the address
-            instructions = self.target.GetInstructions(lldb.SBAddress(address, self.target), count)
-            lines = []
+            # Handle address parameter - could be string or int
+            if isinstance(address, str):
+                if address.startswith("0x"):
+                    address = int(address, 16)
+                else:
+                    address = int(address)
             
-            for i in range(instructions.GetSize()):
-                inst = instructions.GetInstructionAtIndex(i)
-                if inst.IsValid():
-                    addr = inst.GetAddress().GetLoadAddress(self.target)
-                    mnemonic = inst.GetMnemonic(self.target)
-                    operands = inst.GetOperands(self.target)
-                    bytes = inst.GetBytes(self.target)
-                    
-                    # Convert bytes to hex string
-                    hex_bytes = ' '.join([f'{b:02x}' for b in bytes])
+            log_lldb(f"Disassembling {count} instructions from 0x{address:x}")
+            
+            # Create address object
+            sb_address = lldb.SBAddress(address, self.target)
+            if not sb_address.IsValid():
+                return self.buildError(f"invalid address: 0x{address:x}")
+            
+            # Use LLDB command interpreter for disassembly - more reliable
+            process = self.target.GetProcess()
+            if not process or not process.IsValid():
+                return self.buildError("no valid process")
+            
+            # Use LLDB command interpreter to get disassembly
+            command_interpreter = self.debugger.GetCommandInterpreter()
+            command_result = lldb.SBCommandReturnObject()
+            
+            # Create disassembly command
+            disasm_cmd = f"disassemble --count {count} --start-address 0x{address:x}"
+            log_lldb(f"Executing LLDB command: {disasm_cmd}")
+            
+            # Execute the command
+            command_interpreter.HandleCommand(disasm_cmd, command_result)
+            
+            if not command_result.Succeeded():
+                return self.buildError(f"disassembly command failed: {command_result.GetError()}")
+            
+            # Parse the output
+            output = command_result.GetOutput()
+            if not output:
+                return self.buildError("no disassembly output received")
+            
+            log_lldb(f"Disassembly output: {output[:200]}...")
+            
+            # Parse the disassembly output
+            lines = []
+            output_lines = output.strip().split('\n')
+            
+            for line in output_lines:
+                line = line.strip()
+                if not line or line.startswith('(') or line.startswith('Process') or line.endswith(':'):
+                    continue
+                
+                # Handle LLDB format: "->  0x7ff8125dd93a <+10>: retq" or "    0x7ff8125dd93b <+11>: nop"
+                # Remove arrow indicator and extra spaces
+                line = line.replace('->', '').strip()
+                
+                # Parse line format: "0x7ff8125dd93a <+10>: retq" or "0x12345678: 48 89 e5    movq   %rsp, %rbp"
+                parts = line.split(':', 1)
+                if len(parts) != 2:
+                    continue
+                
+                addr_part = parts[0].strip()
+                
+                # Extract address from formats like "0x7ff8125dd93a <+10>" or "0x7ff8125dd93a"
+                if '<' in addr_part:
+                    addr_part = addr_part.split('<')[0].strip()
+                
+                if not addr_part.startswith('0x'):
+                    continue
+                
+                try:
+                    addr = int(addr_part, 16)
+                except ValueError:
+                    continue
+                
+                # Parse instruction part
+                inst_part = parts[1].strip()
+                
+                # Split instruction part - could be "retq" or "48 89 e5    movq   %rsp, %rbp"
+                inst_parts = inst_part.split()
+                
+                if len(inst_parts) >= 1:
+                    # Check if first part looks like hex bytes (contains only hex digits)
+                    first_part = inst_parts[0]
+                    if len(first_part) == 2 and all(c in '0123456789abcdefABCDEF' for c in first_part):
+                        # Format with bytes: "48 89 e5    movq   %rsp, %rbp"
+                        hex_bytes = ' '.join(inst_parts[0:3])  # Take first few parts as bytes
+                        if len(inst_parts) > 3:
+                            instruction = inst_parts[3]
+                            operands = ' '.join(inst_parts[4:]) if len(inst_parts) > 4 else ""
+                        else:
+                            instruction = "???"
+                            operands = ""
+                    else:
+                        # Format without bytes: "retq" or "movq %rsp, %rbp"
+                        hex_bytes = ""
+                        instruction = inst_parts[0]
+                        operands = ' '.join(inst_parts[1:]) if len(inst_parts) > 1 else ""
                     
                     lines.append({
                         'address': addr,
-                        'instruction': f"{mnemonic} {operands}".strip(),
+                        'instruction': instruction,
+                        'operands': operands,
                         'bytes': hex_bytes
                     })
             
-            return {"lines": lines}
+            if not lines:
+                return self.buildError("no valid disassembly lines found")
+            
+            log_lldb(f"Successfully disassembled {len(lines)} instructions")
+            # Send as proper message format expected by Swift
+            return {"type": "disassembly", "payload": {"lines": lines}}
         except Exception as e:
             log_error(f"Exception in disassembly: {str(e)}", e)
             return self.buildError(f"disassembly failed: {str(e)}")
@@ -233,17 +331,226 @@ class Handler:
             if not thread.IsValid():
                 return self.buildError("no valid thread")
             
+            log_lldb("Stepping one instruction")
+            
             # Step one instruction
-            thread.StepInstruction(False)
+            thread.StepInstruction(False)  # False = step over function calls
             
             # Wait for the process to stop
-            while process.GetState() == lldb.eStateRunning:
+            timeout = 100  # 1 second timeout
+            while process.GetState() == lldb.eStateRunning and timeout > 0:
                 time.sleep(0.01)
+                timeout -= 1
+            
+            if timeout <= 0:
+                log_error("Step instruction timeout")
+                return self.buildError("step timeout")
+            
+            # Get new PC after step
+            frame = thread.GetFrameAtIndex(0)
+            if frame.IsValid():
+                pc = frame.GetPC()
+                log_lldb(f"Step completed, new PC: 0x{pc:x}")
+                
+                # Send stopped event with new PC
+                self.sendEvent({
+                    "type": "stopped", 
+                    "payload": {
+                        "reason": "step",
+                        "pc": pc,
+                        "thread_id": thread.GetThreadID()
+                    }
+                })
             
             return self.buildOK()
         except Exception as e:
             log_error(f"Exception in stepInstruction: {str(e)}", e)
             return self.buildError(f"stepInstruction failed: {str(e)}")
+    
+    def stepOver(self):
+        try:
+            if self.target == None or self.target.GetProcess() == None:
+                return self.buildError("no process")
+            
+            process = self.target.GetProcess()
+            if not process.IsValid():
+                return self.buildError("process not valid")
+            
+            thread = process.GetThreadAtIndex(0)
+            if not thread.IsValid():
+                return self.buildError("no valid thread")
+            
+            log_lldb("Stepping over")
+            
+            # Step over (next line)
+            thread.StepOver()
+            
+            # Wait for the process to stop
+            timeout = 100
+            while process.GetState() == lldb.eStateRunning and timeout > 0:
+                time.sleep(0.01)
+                timeout -= 1
+            
+            if timeout <= 0:
+                return self.buildError("step over timeout")
+            
+            # Get new PC after step
+            frame = thread.GetFrameAtIndex(0)
+            if frame.IsValid():
+                pc = frame.GetPC()
+                log_lldb(f"Step over completed, new PC: 0x{pc:x}")
+                
+                self.sendEvent({
+                    "type": "stopped", 
+                    "payload": {
+                        "reason": "step",
+                        "pc": pc,
+                        "thread_id": thread.GetThreadID()
+                    }
+                })
+            
+            return self.buildOK()
+        except Exception as e:
+            log_error(f"Exception in stepOver: {str(e)}", e)
+            return self.buildError(f"stepOver failed: {str(e)}")
+    
+    def stepOut(self):
+        try:
+            if self.target == None or self.target.GetProcess() == None:
+                return self.buildError("no process")
+            
+            process = self.target.GetProcess()
+            if not process.IsValid():
+                return self.buildError("process not valid")
+            
+            thread = process.GetThreadAtIndex(0)
+            if not thread.IsValid():
+                return self.buildError("no valid thread")
+            
+            log_lldb("Stepping out")
+            
+            # Step out of current function
+            thread.StepOut()
+            
+            # Wait for the process to stop
+            timeout = 200  # Longer timeout for step out
+            while process.GetState() == lldb.eStateRunning and timeout > 0:
+                time.sleep(0.01)
+                timeout -= 1
+            
+            if timeout <= 0:
+                return self.buildError("step out timeout")
+            
+            # Get new PC after step
+            frame = thread.GetFrameAtIndex(0)
+            if frame.IsValid():
+                pc = frame.GetPC()
+                log_lldb(f"Step out completed, new PC: 0x{pc:x}")
+                
+                self.sendEvent({
+                    "type": "stopped", 
+                    "payload": {
+                        "reason": "step",
+                        "pc": pc,
+                        "thread_id": thread.GetThreadID()
+                    }
+                })
+            
+            return self.buildOK()
+        except Exception as e:
+            log_error(f"Exception in stepOut: {str(e)}", e)
+            return self.buildError(f"stepOut failed: {str(e)}")
+    
+    def continueExecution(self):
+        try:
+            if self.target == None or self.target.GetProcess() == None:
+                return self.buildError("no process")
+            
+            process = self.target.GetProcess()
+            if not process.IsValid():
+                return self.buildError("process not valid")
+            
+            log_lldb("Continuing execution")
+            
+            # Continue execution
+            process.Continue()
+            
+            return self.buildOK()
+        except Exception as e:
+            log_error(f"Exception in continueExecution: {str(e)}", e)
+            return self.buildError(f"continueExecution failed: {str(e)}")
+    
+    def stopExecution(self):
+        try:
+            if self.target == None or self.target.GetProcess() == None:
+                return self.buildError("no process")
+            
+            process = self.target.GetProcess()
+            if not process.IsValid():
+                return self.buildError("process not valid")
+            
+            log_lldb("Stopping execution")
+            
+            # Stop/halt the process
+            process.Stop()
+            
+            # Wait for it to actually stop
+            timeout = 100
+            while process.GetState() == lldb.eStateRunning and timeout > 0:
+                time.sleep(0.01)
+                timeout -= 1
+            
+            if process.GetState() == lldb.eStateStopped:
+                # Get current PC
+                thread = process.GetThreadAtIndex(0)
+                if thread.IsValid():
+                    frame = thread.GetFrameAtIndex(0)
+                    if frame.IsValid():
+                        pc = frame.GetPC()
+                        log_lldb(f"Process stopped at PC: 0x{pc:x}")
+                        
+                        self.sendEvent({
+                            "type": "stopped", 
+                            "payload": {
+                                "reason": "interrupted",
+                                "pc": pc,
+                                "thread_id": thread.GetThreadID()
+                            }
+                        })
+            
+            return self.buildOK()
+        except Exception as e:
+            log_error(f"Exception in stopExecution: {str(e)}", e)
+            return self.buildError(f"stopExecution failed: {str(e)}")
+    
+    def detach(self):
+        try:
+            if self.target == None or self.target.GetProcess() == None:
+                return self.buildError("no process")
+            
+            process = self.target.GetProcess()
+            if not process.IsValid():
+                return self.buildError("process not valid")
+            
+            log_lldb("Detaching from process")
+            
+            # Detach from the process
+            process.Detach()
+            
+            # Clean up
+            self.target = None
+            self.process = None
+            
+            # Stop event thread
+            if self.eventThread:
+                self.eventThread.running = False
+                self.eventThread = None
+            
+            log_lldb("Successfully detached from process")
+            return self.buildOK()
+        except Exception as e:
+            log_error(f"Exception in detach: {str(e)}", e)
+            return self.buildError(f"detach failed: {str(e)}")
 
     def handleRequest(self, req):
         try:
@@ -272,6 +579,31 @@ class Handler:
             
             elif command == "stepInstruction":
                 result = self.stepInstruction()
+                log_python_server(f"Sending response: {result}")
+                return result
+            
+            elif command == "stepOver":
+                result = self.stepOver()
+                log_python_server(f"Sending response: {result}")
+                return result
+            
+            elif command == "stepOut":
+                result = self.stepOut()
+                log_python_server(f"Sending response: {result}")
+                return result
+            
+            elif command == "continueExecution":
+                result = self.continueExecution()
+                log_python_server(f"Sending response: {result}")
+                return result
+            
+            elif command == "stopExecution":
+                result = self.stopExecution()
+                log_python_server(f"Sending response: {result}")
+                return result
+            
+            elif command == "detach":
+                result = self.detach()
                 log_python_server(f"Sending response: {result}")
                 return result
             
