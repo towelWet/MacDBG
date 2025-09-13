@@ -381,7 +381,7 @@ quit
         addLog("🦶 Step Into")
         
         // Use Python server stepping method (persistent LLDB session)
-        lldbManager.sendCommand(command: "stepInstruction")
+        lldbManager.sendCommand(command: "stepInto")
     }
     
     public func stepOver() async {
@@ -389,7 +389,7 @@ quit
         addLog("🦶 Step Over")
         
         // Use Python server stepping method (persistent LLDB session)
-        lldbManager.sendCommand(command: "stepOver")
+        lldbManager.sendCommand(command: "stepInstruction")
     }
     
     public func stepOut() async {
@@ -398,6 +398,14 @@ quit
         
         // Use Python server stepping method (persistent LLDB session)
         lldbManager.sendCommand(command: "stepOut")
+    }
+    
+    public func stepUntilUserCode() async {
+        guard isAttached else { return }
+        addLog("🏃 Step Until User Code")
+        
+        // Use Python server stepping method (persistent LLDB session)
+        lldbManager.sendCommand(command: "stepUntilUserCode")
     }
     
     public func continueExecution() async {
@@ -700,7 +708,16 @@ extension DebuggerController {
         
         // Refresh data immediately
         lldbManager.getRegisters()
-        lldbManager.getDisassembly(from: event.pc, count: 50)
+        
+        // For stepping events, refresh disassembly around the NEW PC to highlight current instruction
+        if event.reason == "step" || event.reason == "step_into" || event.reason == "step_over" || event.reason == "step_out" || event.reason == "step_until_user_code" {
+            addLog("🎯 Refreshing disassembly around new PC: 0x\(String(format: "%llx", event.pc))")
+            addLog("🔄 Sending disassembly request for stepping event...")
+            lldbManager.getDisassembly(from: event.pc, count: 50)
+        } else {
+            addLog("🔄 Sending disassembly request for non-stepping event...")
+            lldbManager.getDisassembly(from: event.pc, count: 50)
+        }
     }
     
     func lldbManagerDidReceiveRegisters(response: LLDBRegistersResponse) async {
@@ -720,8 +737,15 @@ extension DebuggerController {
             
             // Update program counter from RIP register
             if let rip = convertedRegisters["rip"], rip != 0 {
+                let oldPC = self.programCounter
                 self.programCounter = rip
                 logger.log("🎯 Program counter updated to: 0x\(String(format: "%llx", rip))", category: .lldb)
+                
+                // If PC changed significantly, refresh disassembly around the new PC
+                if oldPC != rip {
+                    addLog("🔄 PC changed from 0x\(String(format: "%llx", oldPC)) to 0x\(String(format: "%llx", rip)) - refreshing disassembly")
+                    self.lldbManager.getDisassembly(from: rip, count: 50)
+                }
                 
                 // If we're attached and don't have disassembly yet, request it from the PC
                 if self.isAttached && self.disassembly.isEmpty {
@@ -743,6 +767,8 @@ extension DebuggerController {
     
     func lldbManagerDidReceiveDisassembly(response: LLDBDisassemblyResponse) async {
         await MainActor.run {
+            addLog("📥 Received disassembly response with \(response.lines.count) lines")
+            
             // Filter out invalid disassembly lines to prevent crashes
             let validLines = response.lines.filter { line in
                 line.address > 0 && 
@@ -751,12 +777,22 @@ extension DebuggerController {
                 line.instruction != "invalid"
             }
             
+            addLog("📊 Filtered to \(validLines.count) valid instructions")
+            
             // Directly update the disassembly array on main thread
             disassembly = validLines
             addLog("📊 Disassembly updated (\(validLines.count) valid instructions)")
             
             if !validLines.isEmpty {
                 addLog("🎯 Disassembly range: 0x\(String(format: "%llx", validLines.first!.address)) - 0x\(String(format: "%llx", validLines.last!.address))")
+                
+                // Check if current PC is in the disassembly
+                let currentPC = programCounter
+                if let pcIndex = validLines.firstIndex(where: { $0.address == currentPC }) {
+                    addLog("✅ Current PC (0x\(String(format: "%llx", currentPC))) found at index \(pcIndex) in disassembly")
+                } else {
+                    addLog("⚠️ Current PC (0x\(String(format: "%llx", currentPC))) NOT found in disassembly range")
+                }
             } else {
                 addLog("⚠️ No valid disassembly lines received")
             }

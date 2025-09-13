@@ -139,6 +139,14 @@ struct DisassemblyView: View {
                             proxy.scrollTo(debugger.programCounter, anchor: .center)
                         }
                     }
+                    .onChange(of: debugger.programCounter) { newPC in
+                        // Auto-scroll to new PC after stepping (like x64dbg)
+                        if newPC != 0 {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                proxy.scrollTo(newPC, anchor: .center)
+                            }
+                        }
+                    }
                     .onChange(of: debugger.navigationTarget) { target in
                         // Handle string navigation (like Ghidra's "Go To" functionality)
                         if let targetAddress = target {

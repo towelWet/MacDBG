@@ -174,6 +174,12 @@ public struct LLDBStoppedEvent: Decodable {
     public let reason: String
     public let threadId: UInt64
     public let pc: UInt64
+    
+    enum CodingKeys: String, CodingKey {
+        case reason
+        case threadId = "thread_id"
+        case pc
+    }
 }
 
 /// Payload for the `registers` response.

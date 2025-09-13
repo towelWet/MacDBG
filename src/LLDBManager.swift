@@ -475,12 +475,20 @@ class LLDBManager {
         sendCommand(command: "stepInstruction")
     }
     
+    func stepInto() {
+        sendCommand(command: "stepInto")
+    }
+    
     func stepOver() {
         sendCommand(command: "stepOver")
     }
     
     func stepOut() {
         sendCommand(command: "stepOut")
+    }
+    
+    func stepUntilUserCode() {
+        sendCommand(command: "stepUntilUserCode")
     }
 
     func continueExecution() {

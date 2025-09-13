@@ -240,6 +240,85 @@ quit, exit           # Exit the CLI (detaches first if attached)
 - Permission validation
 - Safe defaults
 
+## Stepping System
+
+MacDBG features a robust and intelligent stepping system that handles complex debugging scenarios, including system library navigation and automatic instruction highlighting.
+
+### Stepping Operations
+
+- **Step Into (F7)** - Steps into function calls, following execution into subroutines
+- **Step Over (F8)** - Steps over function calls, executing them without entering
+- **Step Out (Shift+F7)** - Steps out of the current function to its caller
+- **Step Until User Code** - Automatically steps until reaching user code (exits system libraries)
+
+### Intelligent System Library Handling
+
+The stepping system includes sophisticated logic for handling system library code:
+
+- **Automatic Detection** - Identifies when execution is in system libraries (e.g., `libsystem_kernel.dylib`)
+- **Aggressive Recovery** - When stuck on system instructions (like `retq`), automatically attempts multiple recovery strategies:
+  - Multiple `StepOut` attempts to exit system functions
+  - Brief `Continue`/`Stop` cycles to force execution progression
+  - Fallback to alternative PC detection methods
+- **Smart PC Detection** - Uses multiple methods to determine the current program counter:
+  - Direct frame access
+  - Register inspection (RIP register)
+  - LLDB command execution
+  - Fallback to previous PC if all else fails
+
+### Real-time UI Updates
+
+The stepping system ensures the UI stays synchronized with execution:
+
+- **Automatic Disassembly Refresh** - Disassembly view automatically updates to show the current instruction
+- **Instruction Highlighting** - Current instruction is highlighted in the disassembly view
+- **Auto-scroll** - View automatically scrolls to the current instruction location
+- **Register Updates** - CPU registers are refreshed after each step
+- **Event-driven Architecture** - Uses structured JSON events between Python LLDB server and Swift UI
+
+### Event System Architecture
+
+```
+User Action (Step Into)
+    ↓
+Swift UI (DebuggerController)
+    ↓
+LLDB Manager (JSON Command)
+    ↓
+Python LLDB Server (Resources/lldb_server.py)
+    ↓
+LLDB API (Step Execution)
+    ↓
+Event Thread (Process State Detection)
+    ↓
+Structured Event (JSON Response)
+    ↓
+Swift UI (Update Disassembly + Highlight)
+```
+
+### Stepping Event Types
+
+- `step_into` - Step into function calls
+- `step_over` - Step over function calls  
+- `step_out` - Step out of current function
+- `step_until_user_code` - Step until reaching user code
+
+### Error Recovery
+
+The system includes comprehensive error recovery:
+
+- **Invalid Frame Handling** - Gracefully handles cases where LLDB frames become invalid
+- **PC Change Detection** - Monitors for cases where the program counter doesn't advance
+- **System Library Stuck Detection** - Identifies when execution is stuck in system code
+- **Multiple Recovery Attempts** - Tries various strategies to unstick execution
+
+### Performance Optimizations
+
+- **Throttled Requests** - Prevents excessive disassembly requests
+- **Cached Disassembly** - Maintains disassembly cache for better performance
+- **Efficient Event Handling** - Uses structured JSON for fast communication
+- **Background Processing** - Stepping operations don't block the UI
+
 ## Development
 
 ### Building from Source
@@ -270,6 +349,8 @@ MacDBG follows a pragmatic MVVM architecture with a native high-performance core
 ### ✅ Completed
 - Process attachment and debugging
 - Real-time disassembly with jump visualization
+- **Intelligent stepping system** with system library handling
+- **Automatic instruction highlighting** and UI synchronization
 - Memory and register inspection
 - Live instruction editing
 - CLI interface

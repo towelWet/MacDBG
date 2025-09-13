@@ -28,10 +28,8 @@ class EventThread(threading.Thread):
                         event = lldb.SBEvent()
                         if self.handler.debugger.GetListener().GetNextEvent(event):
                             log_python_server(f"Event received: {event.GetType()}")
-                            if event.GetType() & lldb.SBProcess.eStateStopped:
-                                log_python_server("Process stopped")
-                                # Send stopped event to Swift
-                                self.handler.sendEvent({"type": "stopped", "reason": "step"})
+                            # Don't send generic stopped events - let the stepping methods handle their own events
+                            # This prevents interference with proper stepping events that include PC information
                 time.sleep(0.1)
             except Exception as e:
                 log_error(f"Error in EventThread: {str(e)}", e)
@@ -319,6 +317,14 @@ class Handler:
             return self.buildError(f"disassembly failed: {str(e)}")
 
     def stepInstruction(self):
+        """Step one instruction (step over calls)"""
+        return self._stepInstruction(False)
+    
+    def stepInto(self):
+        """Step one instruction (step into calls)"""
+        return self._stepInstruction(True)
+    
+    def _stepInstruction(self, step_into_calls=False):
         try:
             if self.target == None or self.target.GetProcess() == None:
                 return self.buildError("no process")
@@ -327,14 +333,59 @@ class Handler:
             if not process.IsValid():
                 return self.buildError("process not valid")
             
+            # Check if process is already running
+            state = process.GetState()
+            if state == lldb.eStateRunning:
+                log_lldb("Process is running, stopping first...")
+                process.Stop()
+                # Wait for it to stop
+                timeout = 50
+                while process.GetState() == lldb.eStateRunning and timeout > 0:
+                    time.sleep(0.01)
+                    timeout -= 1
+            
+            # Check if we're in a valid state for stepping
+            if process.GetState() not in [lldb.eStateStopped, lldb.eStateSuspended]:
+                log_error(f"Process not in stoppable state: {process.GetState()}")
+                return self.buildError(f"process state invalid for stepping: {process.GetState()}")
+            
             thread = process.GetThreadAtIndex(0)
             if not thread.IsValid():
                 return self.buildError("no valid thread")
             
-            log_lldb("Stepping one instruction")
+            step_type = "into" if step_into_calls else "over"
+            log_lldb(f"Stepping one instruction ({step_type})")
+            
+            # Get current PC before stepping
+            frame = thread.GetFrameAtIndex(0)
+            old_pc = frame.GetPC() if frame.IsValid() else 0
+            log_lldb(f"Current PC before step: 0x{old_pc:x}")
+            
+            # Check if we're in system library code
+            in_system_lib = False
+            if frame.IsValid():
+                module = frame.GetModule()
+                if module.IsValid():
+                    module_name = module.GetFileSpec().GetFilename()
+                    if module_name and ("libsystem" in module_name or "dylib" in module_name):
+                        in_system_lib = True
+                        log_lldb(f"Stepping in system library: {module_name}")
             
             # Step one instruction
-            thread.StepInstruction(False)  # False = step over function calls
+            try:
+                thread.StepInstruction(step_into_calls)
+            except Exception as step_e:
+                log_error(f"StepInstruction failed: {str(step_e)}", step_e)
+                # Try alternative stepping method
+                try:
+                    if step_into_calls:
+                        thread.StepInto()
+                    else:
+                        thread.StepOver()
+                    log_lldb("Used alternative stepping method")
+                except Exception as alt_e:
+                    log_error(f"Alternative stepping also failed: {str(alt_e)}", alt_e)
+                    return self.buildError(f"stepping failed: {str(step_e)}")
             
             # Wait for the process to stop
             timeout = 100  # 1 second timeout
@@ -342,29 +393,156 @@ class Handler:
                 time.sleep(0.01)
                 timeout -= 1
             
-            if timeout <= 0:
-                log_error("Step instruction timeout")
-                return self.buildError("step timeout")
+            # Check final state
+            final_state = process.GetState()
+            log_lldb(f"Process state after step: {final_state}")
             
-            # Get new PC after step
+            if timeout <= 0:
+                log_error(f"Step instruction ({step_type}) timeout, final state: {final_state}")
+                # Don't return error immediately, try to get PC anyway
+                log_lldb("Attempting to get PC despite timeout...")
+            elif final_state not in [lldb.eStateStopped, lldb.eStateSuspended]:
+                log_lldb(f"Process not stopped after step, state: {final_state}")
+                # Continue anyway, might still be able to get PC
+            
+            # Get new PC after step - try multiple methods
             frame = thread.GetFrameAtIndex(0)
+            pc = 0
+            
             if frame.IsValid():
                 pc = frame.GetPC()
-                log_lldb(f"Step completed, new PC: 0x{pc:x}")
+                log_lldb(f"Step ({step_type}) completed, new PC: 0x{pc:x}")
+            else:
+                # Frame might be invalid, try getting PC directly from thread
+                log_lldb("Frame invalid after step, trying to get PC from thread...")
+                try:
+                    # Try to get PC from registers using a different approach
+                    if thread.GetNumFrames() > 0:
+                        try:
+                            frame_0 = thread.GetFrameAtIndex(0)
+                            if frame_0:
+                                registers = frame_0.GetRegisters()
+                                if registers:
+                                    for reg_set in registers:
+                                        for reg in reg_set:
+                                            reg_name = reg.GetName().lower()
+                                            if reg_name in ['pc', 'rip', 'eip']:
+                                                reg_value = reg.GetValue()
+                                                if reg_value:
+                                                    pc = int(reg_value, 16)
+                                                    log_lldb(f"Got PC from register {reg_name}: 0x{pc:x}")
+                                                    break
+                                        if pc != 0:
+                                            break
+                        except Exception as reg_e:
+                            log_lldb(f"Error accessing registers: {str(reg_e)}")
+                    
+                    # Alternative method: use LLDB command to get PC
+                    if pc == 0:
+                        try:
+                            result = lldb.SBCommandReturnObject()
+                            self.target.GetDebugger().GetCommandInterpreter().HandleCommand("register read pc", result)
+                            if result.Succeeded():
+                                output = result.GetOutput()
+                                # Parse PC from output like "pc = 0x7ff8125dd93b"
+                                import re
+                                match = re.search(r'pc\s*=\s*0x([0-9a-fA-F]+)', output)
+                                if match:
+                                    pc = int(match.group(1), 16)
+                                    log_lldb(f"Got PC from command: 0x{pc:x}")
+                        except Exception as cmd_e:
+                            log_lldb(f"Error using register command: {str(cmd_e)}")
+                    
+                    # If still no PC, try alternative method
+                    if pc == 0:
+                        # Get thread info
+                        thread_info = thread.GetStopDescription(256)
+                        log_lldb(f"Thread stop description: {thread_info}")
+                        
+                        # Try to refresh thread state
+                        process.GetThreadAtIndex(0).GetFrameAtIndex(0)
+                        new_frame = thread.GetFrameAtIndex(0)
+                        if new_frame.IsValid():
+                            pc = new_frame.GetPC()
+                            log_lldb(f"Got PC after refresh: 0x{pc:x}")
+                        else:
+                            # Last resort - use old PC and log warning
+                            pc = old_pc
+                            log_lldb(f"Warning: Could not get new PC, using old PC: 0x{pc:x}")
+                            
+                except Exception as e:
+                    log_error(f"Error getting PC after step: {str(e)}", e)
+                    pc = old_pc
+                    log_lldb(f"Using old PC due to error: 0x{pc:x}")
+            
+            # Check if PC actually changed
+            if pc == old_pc:
+                log_lldb(f"Warning: PC did not change after step (0x{pc:x})")
                 
-                # Send stopped event with new PC
-                self.sendEvent({
-                    "type": "stopped", 
-                    "payload": {
-                        "reason": "step",
-                        "pc": pc,
-                        "thread_id": thread.GetThreadID()
-                    }
-                })
+                # If we're stuck on the same instruction, try a different approach
+                if in_system_lib:
+                    log_lldb("Attempting to step out of system library...")
+                    try:
+                        # First try step out
+                        thread.StepOut()
+                        
+                        # Wait a bit for step out to complete
+                        step_out_timeout = 50
+                        while process.GetState() == lldb.eStateRunning and step_out_timeout > 0:
+                            time.sleep(0.01)
+                            step_out_timeout -= 1
+                        
+                        # Try to get new PC after step out
+                        new_frame = thread.GetFrameAtIndex(0)
+                        if new_frame.IsValid():
+                            new_pc = new_frame.GetPC()
+                            if new_pc != pc:
+                                pc = new_pc
+                                log_lldb(f"Step out successful, new PC: 0x{pc:x}")
+                            else:
+                                log_lldb("Step out didn't change PC, trying continue...")
+                                # If step out didn't work, try continue briefly
+                                process.Continue()
+                                time.sleep(0.01)  # Very brief continue
+                                process.Stop()
+                                
+                                # Wait for stop
+                                stop_timeout = 30
+                                while process.GetState() == lldb.eStateRunning and stop_timeout > 0:
+                                    time.sleep(0.01)
+                                    stop_timeout -= 1
+                                
+                                # Get PC after continue/stop
+                                final_frame = thread.GetFrameAtIndex(0)
+                                if final_frame.IsValid():
+                                    pc = final_frame.GetPC()
+                                    log_lldb(f"Continue/stop resulted in PC: 0x{pc:x}")
+                        else:
+                            log_lldb("Step out completed but frame still invalid")
+                            
+                    except Exception as step_out_e:
+                        log_lldb(f"Step out failed: {str(step_out_e)}")
+                else:
+                    # Not in system library but PC didn't change - might be a different issue
+                    log_lldb("PC didn't change in user code - this might indicate a problem")
+            
+            # Always send event, even if PC didn't change or we had issues
+            log_lldb(f"Step ({step_type}) completed, PC: 0x{pc:x} (was: 0x{old_pc:x})")
+            
+            # Send stopped event with specific reason
+            reason = "step_into" if step_into_calls else "step_over"
+            self.sendEvent({
+                "type": "stopped", 
+                "payload": {
+                    "reason": reason,
+                    "pc": pc,
+                    "thread_id": thread.GetThreadID()
+                }
+            })
             
             return self.buildOK()
         except Exception as e:
-            log_error(f"Exception in stepInstruction: {str(e)}", e)
+            log_error(f"Exception in _stepInstruction: {str(e)}", e)
             return self.buildError(f"stepInstruction failed: {str(e)}")
     
     def stepOver(self):
@@ -403,7 +581,7 @@ class Handler:
                 self.sendEvent({
                     "type": "stopped", 
                     "payload": {
-                        "reason": "step",
+                        "reason": "step_over",
                         "pc": pc,
                         "thread_id": thread.GetThreadID()
                     }
@@ -450,7 +628,7 @@ class Handler:
                 self.sendEvent({
                     "type": "stopped", 
                     "payload": {
-                        "reason": "step",
+                        "reason": "step_out",
                         "pc": pc,
                         "thread_id": thread.GetThreadID()
                     }
@@ -460,6 +638,91 @@ class Handler:
         except Exception as e:
             log_error(f"Exception in stepOut: {str(e)}", e)
             return self.buildError(f"stepOut failed: {str(e)}")
+    
+    def stepUntilUserCode(self):
+        """Step until we're out of system library code"""
+        try:
+            if self.target == None or self.target.GetProcess() == None:
+                return self.buildError("no process")
+            
+            process = self.target.GetProcess()
+            if not process.IsValid():
+                return self.buildError("process not valid")
+            
+            thread = process.GetThreadAtIndex(0)
+            if not thread.IsValid():
+                return self.buildError("no valid thread")
+            
+            log_lldb("Stepping until user code...")
+            
+            max_attempts = 20  # Prevent infinite loops
+            attempts = 0
+            
+            while attempts < max_attempts:
+                frame = thread.GetFrameAtIndex(0)
+                if not frame.IsValid():
+                    break
+                
+                # Check if we're in system library
+                module = frame.GetModule()
+                in_system_lib = False
+                if module.IsValid():
+                    module_name = module.GetFileSpec().GetFilename()
+                    if module_name and ("libsystem" in module_name or "dylib" in module_name):
+                        in_system_lib = True
+                
+                if not in_system_lib:
+                    log_lldb("Reached user code!")
+                    break
+                
+                log_lldb(f"Still in system code (attempt {attempts + 1}), stepping out...")
+                
+                # Try step out
+                thread.StepOut()
+                
+                # Wait for completion
+                timeout = 100
+                while process.GetState() == lldb.eStateRunning and timeout > 0:
+                    time.sleep(0.01)
+                    timeout -= 1
+                
+                if timeout <= 0:
+                    log_lldb("Timeout during step out, trying continue...")
+                    # Try continue briefly as fallback
+                    process.Continue()
+                    time.sleep(0.05)
+                    process.Stop()
+                    
+                    # Wait for stop
+                    stop_timeout = 50
+                    while process.GetState() == lldb.eStateRunning and stop_timeout > 0:
+                        time.sleep(0.01)
+                        stop_timeout -= 1
+                
+                attempts += 1
+            
+            # Get final PC
+            frame = thread.GetFrameAtIndex(0)
+            if frame.IsValid():
+                pc = frame.GetPC()
+                log_lldb(f"Step until user code completed, PC: 0x{pc:x}")
+                
+                self.sendEvent({
+                    "type": "stopped", 
+                    "payload": {
+                        "reason": "step_until_user_code",
+                        "pc": pc,
+                        "thread_id": thread.GetThreadID()
+                    }
+                })
+            else:
+                log_error("Invalid frame after step until user code")
+                return self.buildError("invalid frame after step until user code")
+            
+            return self.buildOK()
+        except Exception as e:
+            log_error(f"Exception in stepUntilUserCode: {str(e)}", e)
+            return self.buildError(f"stepUntilUserCode failed: {str(e)}")
     
     def continueExecution(self):
         try:
@@ -582,6 +845,11 @@ class Handler:
                 log_python_server(f"Sending response: {result}")
                 return result
             
+            elif command == "stepInto":
+                result = self.stepInto()
+                log_python_server(f"Sending response: {result}")
+                return result
+            
             elif command == "stepOver":
                 result = self.stepOver()
                 log_python_server(f"Sending response: {result}")
@@ -589,6 +857,11 @@ class Handler:
             
             elif command == "stepOut":
                 result = self.stepOut()
+                log_python_server(f"Sending response: {result}")
+                return result
+            
+            elif command == "stepUntilUserCode":
+                result = self.stepUntilUserCode()
                 log_python_server(f"Sending response: {result}")
                 return result
             
