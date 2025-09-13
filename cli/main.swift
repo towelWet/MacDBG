@@ -111,7 +111,7 @@ struct MacDBGCLI {
     private static func step(debugger: DebuggerController) async {
         guard await debugger.isAttached else { print("Not attached."); return }
         print("Stepping...")
-        await debugger.step()
+        await debugger.stepInto()
         print("Step complete. Status: \(await debugger.status)")
         await disassemble(debugger: debugger)
     }
@@ -156,13 +156,29 @@ struct MacDBGCLI {
         }
         let bytes = (args.count > 1 ? Int(args[1]) : 64) ?? 64
         
-        await debugger.readMemory(address: addrStr, bytes: bytes)
+        // Parse hex address
+        let scanner = Scanner(string: addrStr.hasPrefix("0x") ? String(addrStr.dropFirst(2)) : addrStr)
+        var address: UInt64 = 0
+        guard scanner.scanHexInt64(&address) else {
+            print("Invalid hex address: \(addrStr)")
+            return
+        }
+        
+        await debugger.readMemory(address: address, bytes: bytes)
         let memory = await debugger.memory
         if memory.isEmpty {
             print("Failed to read memory or address is invalid.")
         } else {
-            for line in memory {
-                print("\(line.address)  \(line.bytes.padding(toLength: 48, withPad: " ", startingAt: 0)) \(line.ascii)")
+            for (addr, data) in memory.sorted(by: { $0.key < $1.key }) {
+                let hexString = data.map { String(format: "%02x", $0) }.joined(separator: " ")
+                let asciiString = data.map { byte in
+                    if (0x20...0x7e).contains(byte) {
+                        return String(UnicodeScalar(byte))
+                    } else {
+                        return "."
+                    }
+                }.joined()
+                print(String(format: "0x%016llx  %-48s %s", addr, hexString, asciiString))
             }
         }
     }

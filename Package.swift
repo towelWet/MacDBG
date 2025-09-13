@@ -37,7 +37,13 @@ let package = Package(
                 "DisassemblyView_UltraSimple.swift",
                 "MinimalContentView.swift",
                 "MinimalDebuggerController.swift",
-                "DisassemblyView.swift.backup"
+                "DisassemblyView.swift.backup",
+                "AIModelManager.swift",
+                "AIAssistantView.swift",
+                "AIChatView.swift",
+                "AIChatView_Enhanced.swift",
+                "ContentView.swift",
+                "DisassemblyView.swift"
             ],
             resources: [
                 .process("../../models")

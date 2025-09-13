@@ -165,17 +165,29 @@ public class DebuggerController: ObservableObject, LLDBManagerDelegate {
     }
     
     public func attachToProcess(_ pid: pid_t) async {
+        macdbgLog("🔗 DebuggerController.attachToProcess called", category: .lldb)
+        macdbgLog("   PID: \(pid)", category: .lldb)
+        
         selectedPID = pid
         addLog("🔗 Attaching to process \(pid)...")
         
-        // Try to get the executable path for the process
-        let executablePath = await getExecutablePath(for: pid) ?? "/usr/bin/true"
-        logger.log("📁 Using executable path: \(executablePath)", category: .lldb)
-        
-        // Set the attached process path for string extraction
-        attachedProcessPath = executablePath
-        
-        lldbManager.sendCommand(command: "attachToProcess", args: ["pid": pid, "executable": executablePath, "is64Bits": true])
+        do {
+            // Try to get the executable path for the process
+            macdbgLog("🔍 Getting executable path for PID \(pid)", category: .lldb)
+            let executablePath = await getExecutablePath(for: pid) ?? "/usr/bin/true"
+            macdbgLog("📁 Using executable path: \(executablePath)", category: .lldb)
+            
+            // Set the attached process path for string extraction
+            attachedProcessPath = executablePath
+            
+            // Use Python server for persistent LLDB session
+            macdbgLog("📤 Sending attachToProcess command to LLDBManager", category: .lldb)
+            lldbManager.sendCommand(command: "attachToProcess", args: ["pid": pid, "executable": executablePath, "is64Bits": true])
+            macdbgLog("✅ Attach command sent successfully", category: .lldb)
+        } catch {
+            macdbgLog("❌ Error in attachToProcess: \(error)", category: .error)
+            macdbgLogCrash(error, context: "attachToProcess failed for PID \(pid)")
+        }
     }
     
     // MARK: - Binary Launch
@@ -247,27 +259,237 @@ public class DebuggerController: ObservableObject, LLDBManagerDelegate {
         
         macdbgLog("📤 CACHE MISS: Fetching fresh disassembly", category: .lldb)
         
-        // Fetch large buffer like x64dbg
-        let instructionsBefore: UInt64 = 200
-        let instructionsAfter: UInt64 = 300
-        let start: UInt64 = pc > instructionsBefore * 4 ? pc - instructionsBefore * 4 : 0
-        let totalCount = Int(instructionsBefore + instructionsAfter)
+        // Use Python server for persistent LLDB session
+        lldbManager.sendCommand(command: "disassembly", args: ["address": String(format: "0x%llx", pc), "count": 50])
+    }
+    
+    private func executeDirectDisassembly(around pc: UInt64) async {
+        guard let executablePath = attachedProcessPath else {
+            addLog("❌ No executable path available for disassembly")
+            return
+        }
         
-        lldbManager.getDisassembly(from: start, count: totalCount)
+        let lldbScript = """
+target create "\(executablePath)"
+process attach --pid \(currentPID)
+disassemble --pc --count 50
+register read rip
+quit
+"""
+        
+        addLog("🔧 Direct LLDB disassembly around PC: 0x\(String(format: "%llx", pc))")
+        
+        Task {
+            do {
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: "/Applications/Xcode.app/Contents/Developer/usr/bin/lldb")
+                process.arguments = ["--no-lldbinit", "--batch"]
+                
+                let inputPipe = Pipe()
+                let outputPipe = Pipe()
+                
+                process.standardInput = inputPipe
+                process.standardOutput = outputPipe
+                process.standardError = outputPipe
+                
+                try process.run()
+                
+                // Send commands
+                let inputHandle = inputPipe.fileHandleForWriting
+                inputHandle.write(lldbScript.data(using: .utf8)!)
+                inputHandle.closeFile()
+                
+                // Read output
+                let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
+                let output = String(data: outputData, encoding: .utf8) ?? ""
+                
+                process.waitUntilExit()
+                
+                await MainActor.run {
+                    self.addLog("📄 LLDB Disassembly Output:")
+                    self.addLog(output)
+                    
+                    // Parse disassembly and registers
+                    self.parseDirectLLDBDisassembly(output)
+                }
+                
+            } catch {
+                await MainActor.run {
+                    self.addLog("❌ Direct LLDB disassembly failed: \(error)")
+                }
+            }
+        }
+    }
+    
+    private func parseDirectLLDBDisassembly(_ output: String) {
+        var newDisassembly: [DisassemblyLine] = []
+        let lines = output.components(separatedBy: .newlines)
+        
+        for line in lines {
+            // Parse disassembly lines like: "->  0x7ff8125dd93a <+10>: retq"
+            // or: "    0x7ff8125dd93b <+11>: nop"
+            if line.contains("0x") && line.contains(":") {
+                // Extract address from lines like "->  0x7ff8125dd93a <+10>: retq"
+                let addressPattern = "0x[0-9a-fA-F]+"
+                if let range = line.range(of: addressPattern, options: .regularExpression) {
+                    let addressStr = String(line[range])
+                    let rest = String(line[range.upperBound...]).trimmingCharacters(in: .whitespaces)
+                    
+                    if let address = UInt64(addressStr.replacingOccurrences(of: "0x", with: ""), radix: 16) {
+                        // Extract instruction after the colon
+                        let colonRange = rest.range(of: ":")
+                        if let colonRange = colonRange {
+                            let instruction = String(rest[colonRange.upperBound...]).trimmingCharacters(in: .whitespaces)
+                            
+                            // Split instruction and operands
+                            let parts = instruction.components(separatedBy: .whitespaces)
+                            let instructionName = parts.first ?? ""
+                            let operands = parts.dropFirst().joined(separator: " ")
+                            
+                            let disasmLine = DisassemblyLine(
+                                address: address,
+                                bytes: "", // LLDB doesn't show bytes in this format
+                                instruction: instructionName,
+                                operands: operands
+                            )
+                            newDisassembly.append(disasmLine)
+                        }
+                    }
+                }
+            }
+            // Also parse RIP register value
+            else if line.contains("rip = 0x") {
+                if let range = line.range(of: "rip = 0x") {
+                    let ripString = String(line[range.upperBound...]).components(separatedBy: .whitespaces).first ?? ""
+                    if let ripValue = UInt64(ripString, radix: 16) {
+                        programCounter = ripValue
+                        addLog("📍 PC updated to: 0x\(String(format: "%llx", ripValue))")
+                    }
+                }
+            }
+        }
+        
+        if !newDisassembly.isEmpty {
+            disassembly = newDisassembly
+            addLog("✅ Disassembly updated: \(newDisassembly.count) instructions")
+        }
     }
     
     // MARK: - Stepping
     public func stepInto() async {
         guard isAttached else { return }
         addLog("🦶 Step Into")
-        lldbManager.sendCommand(command: "stepInstruction", args: [:])
+        
+        // Use Python server stepping method (persistent LLDB session)
+        lldbManager.sendCommand(command: "stepInstruction")
     }
     
     public func stepOver() async {
         guard isAttached else { return }
         addLog("🦶 Step Over")
-        lldbManager.sendCommand(command: "stepOver", args: [:])
+        
+        // Use Python server stepping method (persistent LLDB session)
+        lldbManager.sendCommand(command: "stepOver")
     }
+    
+    public func stepOut() async {
+        guard isAttached else { return }
+        addLog("🦶 Step Out")
+        
+        // Use Python server stepping method (persistent LLDB session)
+        lldbManager.sendCommand(command: "stepOut")
+    }
+    
+    public func continueExecution() async {
+        guard isAttached else { return }
+        addLog("▶️ Continue")
+        
+        // Use Python server stepping method (persistent LLDB session)
+        lldbManager.sendCommand(command: "continueExecution")
+    }
+    
+    // Direct LLDB execution - proven to work from CLI tests
+    private func executeDirectLLDBCommand(_ command: String) async {
+        guard let executablePath = attachedProcessPath else {
+            addLog("❌ No executable path available")
+            return
+        }
+        
+        let lldbScript = """
+target create "\(executablePath)"
+process attach --pid \(currentPID)
+\(command)
+register read rip
+disassemble --pc --count 10
+quit
+"""
+        
+        addLog("🔧 Executing direct LLDB: \(command)")
+        
+        Task {
+            do {
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: "/Applications/Xcode.app/Contents/Developer/usr/bin/lldb")
+                process.arguments = ["--no-lldbinit", "--batch"]
+                
+                let inputPipe = Pipe()
+                let outputPipe = Pipe()
+                
+                process.standardInput = inputPipe
+                process.standardOutput = outputPipe
+                process.standardError = outputPipe
+                
+                try process.run()
+                
+                // Send commands
+                let inputHandle = inputPipe.fileHandleForWriting
+                inputHandle.write(lldbScript.data(using: .utf8)!)
+                inputHandle.closeFile()
+                
+                // Read output
+                let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
+                let output = String(data: outputData, encoding: .utf8) ?? ""
+                
+                process.waitUntilExit()
+                
+                await MainActor.run {
+                    self.addLog("📄 LLDB Output:")
+                    self.addLog(output)
+                    
+                    // Parse the output for RIP register value
+                    self.parseDirectLLDBOutput(output)
+                }
+                
+            } catch {
+                await MainActor.run {
+                    self.addLog("❌ Direct LLDB execution failed: \(error)")
+                }
+            }
+        }
+    }
+    
+    private func parseDirectLLDBOutput(_ output: String) {
+        // Extract RIP register value
+        let lines = output.components(separatedBy: .newlines)
+        for line in lines {
+            if line.contains("rip = 0x") {
+                if let range = line.range(of: "rip = 0x") {
+                    let ripString = String(line[range.upperBound...]).components(separatedBy: .whitespaces).first ?? ""
+                    if let ripValue = UInt64(ripString, radix: 16) {
+                        programCounter = ripValue
+                        addLog("📍 PC updated to: 0x\(String(format: "%llx", ripValue))")
+                        
+                        // Refresh disassembly with new PC
+                        Task {
+                            await refreshDisassembly()
+                        }
+                        break
+                    }
+                }
+            }
+        }
+    }
+    
     
     // MARK: - Breakpoints
     public func setBreakpoint(at address: UInt64) async {
@@ -310,7 +532,7 @@ public class DebuggerController: ObservableObject, LLDBManagerDelegate {
     
     public func refreshDisassembly() async {
         guard isAttached else { return }
-        lldbManager.getDisassembly(from: programCounter, count: 150)
+        await refreshDisassemblyAroundPC()
     }
     
     // MARK: - Memory Operations
@@ -521,12 +743,22 @@ extension DebuggerController {
     
     func lldbManagerDidReceiveDisassembly(response: LLDBDisassemblyResponse) async {
         await MainActor.run {
-            // Directly update the disassembly array on main thread
-            disassembly = response.lines
-            addLog("📊 Disassembly updated (\(response.lines.count) instructions)")
+            // Filter out invalid disassembly lines to prevent crashes
+            let validLines = response.lines.filter { line in
+                line.address > 0 && 
+                !line.instruction.isEmpty &&
+                line.instruction != "??" &&
+                line.instruction != "invalid"
+            }
             
-            if !response.lines.isEmpty {
-                addLog("🎯 Disassembly range: 0x\(String(format: "%llx", response.lines.first!.address)) - 0x\(String(format: "%llx", response.lines.last!.address))")
+            // Directly update the disassembly array on main thread
+            disassembly = validLines
+            addLog("📊 Disassembly updated (\(validLines.count) valid instructions)")
+            
+            if !validLines.isEmpty {
+                addLog("🎯 Disassembly range: 0x\(String(format: "%llx", validLines.first!.address)) - 0x\(String(format: "%llx", validLines.last!.address))")
+            } else {
+                addLog("⚠️ No valid disassembly lines received")
             }
         }
     }
@@ -666,15 +898,7 @@ extension DebuggerController {
     }
     
     // MARK: - Missing Methods Referenced by Views
-    public func stepOut() async {
-        lldbManager.sendCommand(command: "stepOut", args: [:])
-        addLog("⬆️ Step out")
-    }
     
-    public func continueExecution() async {
-        lldbManager.sendCommand(command: "continue", args: [:])
-        addLog("▶️ Continue execution")
-    }
     
     public func detach() {
         lldbManager.sendCommand(command: "detach", args: [:])
@@ -708,9 +932,75 @@ extension DebuggerController {
         // Set the attached process path for string extraction
         attachedProcessPath = executablePath
         
+        // Use Python server for persistent LLDB session
         lldbManager.sendCommand(command: "attachToProcess", args: ["pid": pid, "executable": executablePath, "is64Bits": true])
-        addLog("🎯 Attaching to PID: \(pid)")
-        logger.log("✅ Attach command sent successfully for PID \(pid)", category: .lldb)
+    }
+    
+    private func executeDirectAttach(pid: pid_t, executablePath: String) async {
+        let lldbScript = """
+target create "\(executablePath)"
+process attach --pid \(pid)
+register read rip
+disassemble --pc --count 10
+"""
+        
+        addLog("🔧 Direct LLDB attach to PID: \(pid)")
+        
+        Task {
+            do {
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: "/Applications/Xcode.app/Contents/Developer/usr/bin/lldb")
+                process.arguments = ["--no-lldbinit", "--batch"]
+                
+                let inputPipe = Pipe()
+                let outputPipe = Pipe()
+                
+                process.standardInput = inputPipe
+                process.standardOutput = outputPipe
+                process.standardError = outputPipe
+                
+                try process.run()
+                
+                // Send commands
+                let inputHandle = inputPipe.fileHandleForWriting
+                inputHandle.write(lldbScript.data(using: .utf8)!)
+                inputHandle.closeFile()
+                
+                // Read output
+                let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
+                let output = String(data: outputData, encoding: .utf8) ?? ""
+                
+                process.waitUntilExit()
+                
+                await MainActor.run {
+                    self.addLog("📄 LLDB Attach Output:")
+                    self.addLog(output)
+                    
+                    // Check if attach was successful
+                    if output.contains("Process") && (output.contains("stopped") || output.contains("attached")) {
+                        self.isAttached = true
+                        self.currentPID = pid
+                        self.state = .attached
+                        self.addLog("✅ Successfully attached to PID: \(pid)")
+                        
+                        // Parse initial state
+                        self.parseDirectLLDBOutput(output)
+                        
+                        // Trigger disassembly refresh after successful attach
+                        Task {
+                            await self.refreshDisassemblyAroundPC()
+                        }
+                    } else {
+                        self.addLog("❌ Failed to attach to PID: \(pid)")
+                    }
+                }
+                
+            } catch {
+                await MainActor.run {
+                    self.addLog("❌ Direct LLDB attach failed: \(error)")
+                }
+            }
+        }
     }
     
     private func getExecutablePath(for pid: pid_t) async -> String? {
@@ -746,9 +1036,69 @@ extension DebuggerController {
     }
     
     public func getDisassemblyAt(address: UInt64, count: Int = 200) async {
-        // Use getMainExecutableDisassembly for string navigation (like earlier fix)
-        lldbManager.sendCommand(command: "getMainExecutableDisassembly", args: ["count": count])
+        guard isAttached else { return }
         addLog("🎯 Requesting disassembly around address: 0x\(String(format: "%llx", address))")
+        
+        // Use direct LLDB disassembly
+        await executeDirectDisassemblyAt(address: address, count: count)
+    }
+    
+    private func executeDirectDisassemblyAt(address: UInt64, count: Int) async {
+        guard let executablePath = attachedProcessPath else {
+            addLog("❌ No executable path available for disassembly")
+            return
+        }
+        
+        let lldbScript = """
+target create "\(executablePath)"
+process attach --pid \(currentPID)
+disassemble --address 0x\(String(format: "%llx", address)) --count \(count)
+register read rip
+quit
+"""
+        
+        addLog("🔧 Direct LLDB disassembly at address: 0x\(String(format: "%llx", address))")
+        
+        Task {
+            do {
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: "/Applications/Xcode.app/Contents/Developer/usr/bin/lldb")
+                process.arguments = ["--no-lldbinit", "--batch"]
+                
+                let inputPipe = Pipe()
+                let outputPipe = Pipe()
+                
+                process.standardInput = inputPipe
+                process.standardOutput = outputPipe
+                process.standardError = outputPipe
+                
+                try process.run()
+                
+                // Send commands
+                let inputHandle = inputPipe.fileHandleForWriting
+                inputHandle.write(lldbScript.data(using: .utf8)!)
+                inputHandle.closeFile()
+                
+                // Read output
+                let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
+                let output = String(data: outputData, encoding: .utf8) ?? ""
+                
+                process.waitUntilExit()
+                
+                await MainActor.run {
+                    self.addLog("📄 LLDB Disassembly Output:")
+                    self.addLog(output)
+                    
+                    // Parse disassembly and registers
+                    self.parseDirectLLDBDisassembly(output)
+                }
+                
+            } catch {
+                await MainActor.run {
+                    self.addLog("❌ Direct LLDB disassembly failed: \(error)")
+                }
+            }
+        }
     }
     
     public func writeBytes(address: UInt64, bytes: [UInt8]) async {

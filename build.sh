@@ -160,5 +160,17 @@ echo "   ⚡ Faster compilation and startup"
 echo "   ⚡ Reduced memory usage"
 echo "   ⚡ Better UI responsiveness"
 echo "   ⚡ Same familiar interface"
+# Code sign the app for debugging permissions
+echo "🔐 Code signing app for debugging permissions..."
+if [ -f "MacDBG.entitlements" ]; then
+    codesign --force --deep --entitlements MacDBG.entitlements --sign "Apple Development: yiwanfuweng_yonggong@icloud.com (J733LWGZYJ)" "$APP_NAME" 2>/dev/null || {
+        echo "   ⚠️  Code signing failed - you may need to attach to processes manually"
+        echo "   💡 Try: codesign --force --deep --entitlements MacDBG.entitlements --sign \"Apple Development: yiwanfuweng_yonggong@icloud.com (J733LWGZYJ)\" MacDBG.app"
+    }
+    echo "   ✅ App signed with debugging entitlements"
+else
+    echo "   ⚠️  MacDBG.entitlements not found - debugging may not work"
+fi
+
 echo ""
 echo "Run: open MacDBG.app"

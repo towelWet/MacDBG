@@ -1,18 +1,0 @@
-Basic Git2Github workflow:
-
-	If not updating, then I just made new empty repo, 
-	upload everything (besides build files) to github:  git init (initialize the repo locally)
-
-.gitignore confirmed, so unwanted files excluded
-
-git add . (staged all files)
-
-git commit -m "Initial commit" (snapshot created)
-
-	Create the GitHub repo manually:
-
-git remote add origin https://github.com/githubusername/githubrepo
-
-git push -u origin main (this uploads everything)   	If this is a big project we may have to do something like:  git config http.postBuffer 524288000 && git push -u origin main
- 	Because I dont have lfs, so I cant do: git lfs install && git lfs track "*" && git add .gitattributes && git add . && git commit -m "Track large files with Git LFS"
-  

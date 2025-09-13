@@ -14,9 +14,28 @@ struct MacDBGApp: App {
                     // Initialize logging system
                     macdbgLog("🚀 X64DBG-OPTIMIZED MacDBG App Started", category: .system)
                     
-                    // Set up crash detection
+                    // Set up comprehensive crash detection
                     NSSetUncaughtExceptionHandler { exception in
                         macdbgLog("🚨 UNCAUGHT EXCEPTION: \(exception)", category: .crash)
+                        macdbgLog("🚨 Exception name: \(exception.name)", category: .crash)
+                        macdbgLog("🚨 Exception reason: \(exception.reason ?? "Unknown")", category: .crash)
+                        macdbgLog("🚨 Call stack: \(exception.callStackSymbols)", category: .crash)
+                        _ = LoggingSystem.shared.exportLogs()
+                    }
+                    
+                    // Set up signal handlers for other types of crashes
+                    signal(SIGABRT) { _ in
+                        macdbgLog("🚨 SIGABRT received", category: .crash)
+                        _ = LoggingSystem.shared.exportLogs()
+                    }
+                    
+                    signal(SIGSEGV) { _ in
+                        macdbgLog("🚨 SIGSEGV received", category: .crash)
+                        _ = LoggingSystem.shared.exportLogs()
+                    }
+                    
+                    signal(SIGILL) { _ in
+                        macdbgLog("🚨 SIGILL received", category: .crash)
                         _ = LoggingSystem.shared.exportLogs()
                     }
                 }

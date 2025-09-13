@@ -39,34 +39,72 @@ class LLDBManager {
     init() {}
 
     func start() throws {
-        guard process == nil else { return }
-
-        guard let scriptPath = Bundle.main.path(forResource: "lldb_server", ofType: "py") else {
-            throw NSError(domain: "LLDBManager", code: 1, userInfo: [NSLocalizedDescriptionKey: "lldb_server.py not found in app bundle."])
+        macdbgLog("🚀 LLDBManager.start() called", category: .lldb)
+        
+        guard process == nil else { 
+            macdbgLog("⚠️ Process already running, skipping start", category: .lldb)
+            return 
         }
+
+        // Try to find lldb_server.py in multiple locations
+        var scriptPath: String?
+        
+        macdbgLog("🔍 Looking for lldb_server.py...", category: .lldb)
+        
+        // First try app bundle (for GUI)
+        if let bundlePath = Bundle.main.path(forResource: "lldb_server", ofType: "py") {
+            scriptPath = bundlePath
+            macdbgLog("✅ Found in app bundle: \(bundlePath)", category: .lldb)
+        }
+        // Then try Resources directory (for CLI)
+        else if FileManager.default.fileExists(atPath: "Resources/lldb_server.py") {
+            scriptPath = "Resources/lldb_server.py"
+            macdbgLog("✅ Found in Resources directory: \(scriptPath!)", category: .lldb)
+        }
+        // Try absolute path to Resources
+        else if FileManager.default.fileExists(atPath: "/Users/towelwet/Documents/[Towel Ware Dev]/Towel Mac Reverse/MacDBG/Resources/lldb_server.py") {
+            scriptPath = "/Users/towelwet/Documents/[Towel Ware Dev]/Towel Mac Reverse/MacDBG/Resources/lldb_server.py"
+            macdbgLog("✅ Found at absolute path: \(scriptPath!)", category: .lldb)
+        }
+        
+        guard let validScriptPath = scriptPath else {
+            macdbgLog("❌ lldb_server.py not found in any location!", category: .error)
+            throw NSError(domain: "LLDBManager", code: 1, userInfo: [NSLocalizedDescriptionKey: "lldb_server.py not found in app bundle or Resources directory."])
+        }
+        
+        macdbgLog("🔧 Creating Process and pipes...", category: .lldb)
         let task = Process()
         stdinPipe = Pipe()
         stdoutPipe = Pipe()
         stderrPipe = Pipe()
+        
+        macdbgLog("✅ Pipes created successfully", category: .lldb)
 
         // Use Xcode's Python so the 'lldb' module is available
-        task.executableURL = URL(fileURLWithPath: "/Applications/Xcode.app/Contents/Developer/usr/bin/python3")
+        let pythonPath = "/Applications/Xcode.app/Contents/Developer/usr/bin/python3"
+        task.executableURL = URL(fileURLWithPath: pythonPath)
+        macdbgLog("🐍 Using Python at: \(pythonPath)", category: .lldb)
 
         // Pass '0' and '1' so lldb_server.py runs in binary mode (length-prefixed),
         // matching our Swift read/write protocol.
-        task.arguments = [scriptPath, "0", "1"]
+        task.arguments = [validScriptPath, "0", "1"]
+        macdbgLog("📝 Task arguments: \(task.arguments!)", category: .lldb)
 
         // Ensure LLDB's Python modules are on PYTHONPATH. Keep it simple to avoid compile issues.
         // If you have multiple Xcode installs, adjust this path as needed.
         let lldbPy = "/Applications/Xcode.app/Contents/SharedFrameworks/LLDB.framework/Resources/Python"
         task.environment = ["PYTHONPATH": lldbPy]
+        macdbgLog("🔧 PYTHONPATH set to: \(lldbPy)", category: .lldb)
 
         task.standardInput = stdinPipe
         task.standardOutput = stdoutPipe
         task.standardError = stderrPipe
+        macdbgLog("🔗 Pipes connected to task", category: .lldb)
 
+        macdbgLog("🚀 Starting Python process...", category: .lldb)
         try task.run()
         self.process = task
+        macdbgLog("✅ Python process started successfully (PID: \(task.processIdentifier))", category: .lldb)
         onLog?("[LLDBManager] lldb_server.py started.")
 
         // Start a background thread to read from the script's stdout
@@ -306,6 +344,35 @@ class LLDBManager {
     }
 
     func sendCommand(command: String, args: [String: Any] = [:]) {
+        macdbgLog("📤 sendCommand called: \(command)", category: .lldb)
+        macdbgLog("   Args: \(args)", category: .lldb)
+        
+        // Check if LLDBManager is properly initialized
+        macdbgLog("🔍 Checking LLDBManager state...", category: .lldb)
+        macdbgLog("   Process: \(process != nil ? "✅ Initialized" : "❌ Nil")", category: .lldb)
+        macdbgLog("   stdinPipe: \(stdinPipe != nil ? "✅ Initialized" : "❌ Nil")", category: .lldb)
+        macdbgLog("   stdoutPipe: \(stdoutPipe != nil ? "✅ Initialized" : "❌ Nil")", category: .lldb)
+        macdbgLog("   stderrPipe: \(stderrPipe != nil ? "✅ Initialized" : "❌ Nil")", category: .lldb)
+        
+        // Check if the Python process is still running
+        if let process = process {
+            if !process.isRunning {
+                macdbgLog("❌ Python process is not running! Process terminated.", category: .error)
+                let error = NSError(domain: "LLDBManager", code: 3, userInfo: [NSLocalizedDescriptionKey: "Python process terminated"])
+                macdbgLogCrash(error, context: "Python process died before sending command")
+                return
+            } else {
+                macdbgLog("✅ Python process is running (PID: \(process.processIdentifier))", category: .lldb)
+            }
+        }
+        
+        guard let stdinPipe = stdinPipe else {
+            macdbgLog("❌ CRASH PREVENTION: stdinPipe is nil! Cannot send command.", category: .error)
+            let error = NSError(domain: "LLDBManager", code: 1, userInfo: [NSLocalizedDescriptionKey: "stdinPipe is nil - LLDBManager not initialized"])
+            macdbgLogCrash(error, context: "sendCommand called but LLDBManager not initialized")
+            return
+        }
+        
         // Store the command for response handling
         lastSentCommand = command
         
@@ -317,14 +384,36 @@ class LLDBManager {
             let data = try JSONSerialization.data(withJSONObject: fullCommand, options: [])
             if let jsonString = String(data: data, encoding: .utf8) {
                 onLog?("[Swift-SEND] \(jsonString)")
-                macdbgLog("📤 LLDB Command Sent: \(command) with args: \(args)", category: .lldb)
+                macdbgLog("📤 JSON Command: \(jsonString)", category: .lldb)
             }
+            
+            macdbgLog("📤 Data size: \(data.count) bytes", category: .lldb)
+            
             var length = UInt32(data.count).littleEndian
             let lengthData = Data(bytes: &length, count: MemoryLayout<UInt32>.size)
             
-            stdinPipe?.fileHandleForWriting.write(lengthData)
-            stdinPipe?.fileHandleForWriting.write(data)
+            macdbgLog("📤 Writing to stdin pipe...", category: .lldb)
+            
+            // Check if the pipe is still valid before writing
+            if stdinPipe.fileHandleForWriting.fileDescriptor == -1 {
+                macdbgLog("❌ stdinPipe file descriptor is invalid (-1)", category: .error)
+                let error = NSError(domain: "LLDBManager", code: 2, userInfo: [NSLocalizedDescriptionKey: "stdinPipe file descriptor is invalid"])
+                macdbgLogCrash(error, context: "stdinPipe invalid when trying to write")
+                return
+            }
+            
+            // Try to write with error handling
+            do {
+                try stdinPipe.fileHandleForWriting.write(contentsOf: lengthData)
+                try stdinPipe.fileHandleForWriting.write(contentsOf: data)
+                macdbgLog("✅ Command written to pipe successfully", category: .lldb)
+            } catch {
+                macdbgLog("❌ Failed to write to pipe: \(error.localizedDescription)", category: .error)
+                macdbgLogCrash(error, context: "Failed to write to stdinPipe")
+                return
+            }
         } catch {
+            macdbgLog("❌ Error sending command: \(error.localizedDescription)", category: .error)
             onLog?("[LLDBManager] Error sending command: \(error.localizedDescription)")
             macdbgLogCrash(error, context: "Error sending LLDB command: \(command)")
         }
@@ -333,7 +422,16 @@ class LLDBManager {
     // MARK: - High-Level Debugging Commands
 
     func attach(pid: pid_t, executablePath: String) {
-        sendCommand(command: "attachToProcess", args: ["pid": pid, "executable": executablePath, "is64Bits": true])
+        macdbgLog("🔗 LLDBManager.attach called", category: .lldb)
+        macdbgLog("   PID: \(pid)", category: .lldb)
+        macdbgLog("   Executable: \(executablePath)", category: .lldb)
+        
+        do {
+            sendCommand(command: "attachToProcess", args: ["pid": pid, "executable": executablePath, "is64Bits": true])
+            macdbgLog("✅ Attach command sent successfully", category: .lldb)
+        } catch {
+            macdbgLog("❌ Failed to send attach command: \(error)", category: .error)
+        }
     }
 
     func detach() {

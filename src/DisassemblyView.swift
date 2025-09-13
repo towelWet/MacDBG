@@ -107,7 +107,7 @@ struct DisassemblyView: View {
                         let visibleLines = debugger.disassembly // Show ALL lines like x64dbg
                         
                         LazyVStack(alignment: .leading, spacing: 0) {
-                            ForEach(visibleLines, id: \.address) { line in
+                            ForEach(visibleLines.filter { $0.address > 0 }, id: \.address) { line in
                                 OptimizedDisassemblyRowView(
                                     line: line,
                                     isActive: line.address == debugger.programCounter,
